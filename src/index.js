@@ -30,6 +30,12 @@ class StockMonitorApp {
         
         // State lock for atomic operations
         this.stateLock = false;
+        
+        // Application lifecycle state
+        this.isRunning = false;
+        this.isStarting = false;
+        this.isStopping = false;
+        this.schedulersStarted = false;
     }
 
     /**
@@ -310,38 +316,367 @@ class StockMonitorApp {
     }
 
     /**
-     * Set up graceful shutdown handling
+     * Handle runtime errors that should not crash the application
+     * @param {Error} error - The error to handle
+     * @param {string} context - Context where the error occurred
+     */
+    handleRuntimeError(error, context) {
+        const timestamp = new Date().toISOString();
+        console.error(`⚠️ Runtime error in ${context} at ${timestamp}:`, error.message);
+        
+        // Log to console but don't crash the application
+        if (error.stack) {
+            console.error('🔍 Stack trace:', error.stack);
+        }
+        
+        // Could be extended to log to file or send alerts in the future
+        console.log('✅ Application continues running despite error');
+    }
+
+    /**
+     * Set up enhanced graceful shutdown handling with timeout
      */
     setupShutdownHandlers() {
-        const shutdownHandler = (signal) => {
+        let forceExitTimeout = null;
+
+        const gracefulShutdown = async (signal) => {
             if (this.isShuttingDown) {
-                console.log('⚠️  Force shutdown requested');
+                console.log('⚠️ Force shutdown requested - terminating immediately');
+                if (forceExitTimeout) clearTimeout(forceExitTimeout);
                 process.exit(1);
             }
 
             console.log('');
             console.log(`🛑 Received ${signal} - Initiating graceful shutdown...`);
-            this.shutdown(signal);
+            
+            // Set timeout to force exit if graceful shutdown takes too long
+            forceExitTimeout = setTimeout(() => {
+                console.error('❌ Graceful shutdown timeout (35s) - forcing exit');
+                process.exit(1);
+            }, 35000); // 35 seconds to allow 30s for stopApplication + 5s buffer
+            
+            try {
+                await this.shutdown(signal);
+                if (forceExitTimeout) clearTimeout(forceExitTimeout);
+            } catch (error) {
+                console.error('❌ Error during graceful shutdown:', error.message);
+                if (forceExitTimeout) clearTimeout(forceExitTimeout);
+                process.exit(1);
+            }
         };
 
-        process.on('SIGINT', () => shutdownHandler('SIGINT'));
-        process.on('SIGTERM', () => shutdownHandler('SIGTERM'));
+        // Handle termination signals
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         
-        // Handle uncaught exceptions
-        process.on('uncaughtException', (error) => {
+        // Handle runtime errors
+        process.on('uncaughtException', async (error) => {
             console.error('💥 Uncaught Exception:', error.message);
             console.error('🔍 Stack trace:', error.stack);
-            this.shutdown('UNCAUGHT_EXCEPTION');
+            
+            if (this.isShuttingDown) {
+                console.log('⚠️ Already shutting down - forcing exit');
+                process.exit(1);
+            }
+            
+            try {
+                await this.shutdown('UNCAUGHT_EXCEPTION');
+            } catch (shutdownError) {
+                console.error('❌ Error during exception shutdown:', shutdownError.message);
+                process.exit(1);
+            }
         });
 
-        process.on('unhandledRejection', (reason, promise) => {
+        process.on('unhandledRejection', async (reason, promise) => {
             console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
-            this.shutdown('UNHANDLED_REJECTION');
+            
+            if (this.isShuttingDown) {
+                console.log('⚠️ Already shutting down - forcing exit');
+                process.exit(1);
+            }
+            
+            try {
+                await this.shutdown('UNHANDLED_REJECTION');
+            } catch (shutdownError) {
+                console.error('❌ Error during rejection shutdown:', shutdownError.message);
+                process.exit(1);
+            }
         });
     }
 
     /**
-     * Graceful shutdown
+     * Start the complete application with all schedulers
+     * @returns {Object} Result object with success status
+     */
+    async startApplication() {
+        if (this.isRunning || this.isStarting) {
+            return {
+                success: false,
+                message: 'Application is already running or starting'
+            };
+        }
+
+        this.isStarting = true;
+        const startupStart = new Date();
+
+        try {
+            console.log('🚀 Starting Nintendo Switch 2 Stock Monitor Application...');
+            console.log('========================================================');
+            console.log(`⏰ Startup initiated at ${startupStart.toISOString()}`);
+            console.log('');
+
+            // Step 1: Ensure application is initialized
+            if (!this.isInitialized) {
+                console.log('📋 Initializing application...');
+                await this.initialize();
+            }
+
+            // Step 2: Reset application state to clean starting values
+            console.log('🔄 Resetting application state...');
+            await this.resetApplicationState();
+
+            // Step 3: Start stock monitoring scheduler
+            console.log('📊 Starting stock monitoring scheduler...');
+            const stockMonitorResult = startStockMonitoring(() => this.performStockCheck());
+            
+            if (!stockMonitorResult.success) {
+                throw new Error(`Failed to start stock monitoring: ${stockMonitorResult.message || stockMonitorResult.error}`);
+            }
+            console.log('✅ Stock monitoring scheduler started');
+
+            // Step 4: Start daily summary scheduler
+            console.log('📈 Starting daily summary scheduler...');
+            const dailySummaryResult = startDailySummary(() => this.performDailySummary());
+            
+            if (!dailySummaryResult.success) {
+                throw new Error(`Failed to start daily summary: ${dailySummaryResult.message || dailySummaryResult.error}`);
+            }
+            console.log('✅ Daily summary scheduler started');
+
+            // Step 5: Mark application as running
+            this.schedulersStarted = true;
+            this.isRunning = true;
+            this.isStarting = false;
+
+            const startupTime = Date.now() - startupStart.getTime();
+            console.log('');
+            console.log('🎯 Application startup completed successfully!');
+            console.log(`⚡ Startup time: ${startupTime}ms`);
+            console.log('📊 Stock monitoring: Every 30 minutes');
+            console.log('📈 Daily summaries: Midnight daily');
+            console.log('🔒 State management: Active');
+            console.log('');
+            console.log('🟢 Nintendo Switch 2 Stock Monitor is now running!');
+            console.log('⏳ Waiting for scheduled operations...');
+            console.log('');
+
+            return {
+                success: true,
+                message: 'Application started successfully',
+                startupTime: startupTime
+            };
+
+        } catch (error) {
+            this.isStarting = false;
+            console.error('❌ Application startup failed:', error.message);
+            
+            // Attempt cleanup on startup failure
+            try {
+                console.log('🧹 Attempting cleanup after startup failure...');
+                await this.stopApplication();
+            } catch (cleanupError) {
+                console.error('❌ Cleanup after startup failure also failed:', cleanupError.message);
+            }
+
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Stop the complete application gracefully
+     * @param {number} timeout - Maximum time to wait for graceful shutdown (ms)
+     * @returns {Object} Result object with success status
+     */
+    async stopApplication(timeout = 30000) {
+        if (!this.isRunning && !this.isStarting) {
+            return {
+                success: true,
+                message: 'Application is not running'
+            };
+        }
+
+        if (this.isStopping) {
+            return {
+                success: false,
+                message: 'Application is already stopping'
+            };
+        }
+
+        this.isStopping = true;
+        const shutdownStart = new Date();
+
+        try {
+            console.log('🛑 Stopping Nintendo Switch 2 Stock Monitor Application...');
+            console.log('========================================================');
+            console.log(`⏰ Shutdown initiated at ${shutdownStart.toISOString()}`);
+            console.log(`⏱️  Uptime: ${this.getUptime()}`);
+            console.log('');
+
+            // Step 1: Stop schedulers from accepting new operations
+            if (this.schedulersStarted) {
+                console.log('⏸️ Stopping schedulers...');
+                
+                try {
+                    const stockStopResult = stopStockMonitoring();
+                    if (stockStopResult.success) {
+                        console.log('✅ Stock monitoring scheduler stopped');
+                    } else {
+                        console.warn('⚠️ Stock monitoring stop warning:', stockStopResult.message);
+                    }
+                } catch (error) {
+                    console.error('❌ Error stopping stock monitoring:', error.message);
+                }
+
+                try {
+                    const summaryStopResult = stopDailySummary();
+                    if (summaryStopResult.success) {
+                        console.log('✅ Daily summary scheduler stopped');
+                    } else {
+                        console.warn('⚠️ Daily summary stop warning:', summaryStopResult.message);
+                    }
+                } catch (error) {
+                    console.error('❌ Error stopping daily summary:', error.message);
+                }
+
+                this.schedulersStarted = false;
+            }
+
+            // Step 2: Wait for any in-progress operations to complete
+            console.log('⏳ Waiting for in-progress operations...');
+            const waitResult = await this.waitForOperationsToComplete(timeout);
+            
+            if (waitResult.success) {
+                console.log('✅ All operations completed');
+            } else {
+                console.warn('⚠️ Timeout waiting for operations:', waitResult.message);
+            }
+
+            // Step 3: Clean up application state
+            console.log('🧹 Cleaning up application state...');
+            await this.cleanupApplicationState();
+
+            // Step 4: Mark application as stopped
+            this.isRunning = false;
+            this.isStarting = false;
+            this.isStopping = false;
+
+            const shutdownTime = Date.now() - shutdownStart.getTime();
+            console.log('');
+            console.log('🎯 Application shutdown completed successfully!');
+            console.log(`⚡ Shutdown time: ${shutdownTime}ms`);
+            console.log('🔴 Nintendo Switch 2 Stock Monitor stopped');
+            console.log('');
+
+            return {
+                success: true,
+                message: 'Application stopped successfully',
+                shutdownTime: shutdownTime
+            };
+
+        } catch (error) {
+            console.error('❌ Error during application shutdown:', error.message);
+            
+            // Force stop even on error
+            this.isRunning = false;
+            this.isStarting = false;
+            this.isStopping = false;
+            this.schedulersStarted = false;
+
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Reset application state to clean starting values
+     */
+    async resetApplicationState() {
+        try {
+            await this.waitForStateLock();
+            await this.acquireStateLock();
+            
+            this.applicationState = {
+                lastStockStatus: null,
+                lastCheckTime: null,
+                isCheckInProgress: false,
+                dailySummaryLastSent: null,
+                checkCount: 0,
+                lastStateUpdate: new Date().toISOString()
+            };
+            
+            this.releaseStateLock();
+            console.log('✅ Application state reset');
+            
+        } catch (error) {
+            this.releaseStateLock();
+            console.warn('⚠️ Failed to reset application state:', error.message);
+        }
+    }
+
+    /**
+     * Wait for any in-progress operations to complete
+     * @param {number} timeout - Maximum wait time in milliseconds
+     * @returns {Object} Result object with success status
+     */
+    async waitForOperationsToComplete(timeout = 30000) {
+        const start = Date.now();
+        
+        while (this.applicationState.isCheckInProgress && (Date.now() - start) < timeout) {
+            console.log('⏳ Waiting for stock check to complete...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        if (this.applicationState.isCheckInProgress) {
+            return {
+                success: false,
+                message: 'Timeout waiting for operations to complete'
+            };
+        }
+        
+        return {
+            success: true,
+            message: 'All operations completed'
+        };
+    }
+
+    /**
+     * Clean up application state on shutdown
+     */
+    async cleanupApplicationState() {
+        try {
+            await this.waitForStateLock();
+            await this.acquireStateLock();
+            
+            // Force clear any stuck states
+            this.applicationState.isCheckInProgress = false;
+            this.applicationState.lastStateUpdate = new Date().toISOString();
+            
+            this.releaseStateLock();
+            console.log('✅ Application state cleaned up');
+            
+        } catch (error) {
+            this.releaseStateLock();
+            console.warn('⚠️ Failed to cleanup application state:', error.message);
+        }
+    }
+
+    /**
+     * Graceful shutdown (updated to use application lifecycle)
      */
     async shutdown(reason) {
         if (this.isShuttingDown) {
@@ -349,30 +684,27 @@ class StockMonitorApp {
         }
 
         this.isShuttingDown = true;
-        const shutdownStart = new Date();
 
         try {
-            console.log('📊 Shutdown initiated');
-            console.log(`⏱️  Uptime: ${this.getUptime()}`);
+            console.log('');
+            console.log('📊 Process shutdown initiated');
             console.log(`🔍 Reason: ${reason}`);
             console.log('');
 
-            // Future: Stop schedulers (Task 13.3)
-            console.log('🔄 Preparing for scheduler cleanup...');
-            console.log('ℹ️  (Scheduler cleanup will be implemented in Task 13.3)');
+            // Use the new stopApplication method
+            const stopResult = await this.stopApplication(30000);
             
-            // Future: Cleanup resources (Task 13.4)
-            console.log('🧹 Preparing for resource cleanup...');
-            console.log('ℹ️  (Resource cleanup will be implemented in Task 13.4)');
-
-            const shutdownTime = Date.now() - shutdownStart.getTime();
-            console.log('');
-            console.log(`✅ Graceful shutdown completed in ${shutdownTime}ms`);
-            console.log('👋 Nintendo Switch 2 Stock Monitor stopped');
+            if (stopResult.success) {
+                console.log('✅ Graceful shutdown completed');
+            } else {
+                console.error('❌ Graceful shutdown failed:', stopResult.error);
+                console.log('⚠️ Proceeding with forced shutdown');
+            }
             
         } catch (error) {
             console.error('❌ Error during shutdown:', error.message);
         } finally {
+            console.log('👋 Process terminating...');
             process.exit(0);
         }
     }
@@ -727,14 +1059,50 @@ class StockMonitorApp {
 const app = new StockMonitorApp();
 
 /**
- * Start the application if run directly
+ * Initialize the application only (no automatic startup)
  */
 async function main() {
     try {
         await app.initialize();
+        console.log('💡 Application initialized but not started automatically');
+        console.log('💡 Use app.startApplication() to begin monitoring');
+        console.log('💡 Use app.stopApplication() to stop monitoring');
+    } catch (error) {
+        console.error('💥 Failed to initialize application:', error.message);
+        process.exit(1);
+    }
+}
+
+/**
+ * Start the application with full lifecycle management
+ */
+async function startApp() {
+    try {
+        const result = await app.startApplication();
+        if (!result.success) {
+            console.error('💥 Failed to start application:', result.error || result.message);
+            process.exit(1);
+        }
+        return result;
     } catch (error) {
         console.error('💥 Failed to start application:', error.message);
         process.exit(1);
+    }
+}
+
+/**
+ * Stop the application gracefully
+ */
+async function stopApp() {
+    try {
+        const result = await app.stopApplication();
+        if (!result.success) {
+            console.warn('⚠️ Application stop completed with warnings:', result.error || result.message);
+        }
+        return result;
+    } catch (error) {
+        console.error('❌ Error stopping application:', error.message);
+        return { success: false, error: error.message };
     }
 }
 
@@ -743,12 +1111,21 @@ module.exports = {
     StockMonitorApp,
     app,
     main,
+    startApp,
+    stopApp,
+    // Individual operations (for testing)
     performStockCheck: () => app.performStockCheck(),
     performDailySummary: () => app.performDailySummary(),
-    getApplicationState: () => app.getApplicationState()
+    getApplicationState: () => app.getApplicationState(),
+    // Lifecycle methods (direct access)
+    startApplication: () => app.startApplication(),
+    stopApplication: (timeout) => app.stopApplication(timeout),
+    // Status methods
+    getUptime: () => app.getUptime(),
+    getStatus: () => app.getStatus()
 };
 
-// Start application if this file is run directly
+// Initialize application if this file is run directly (but don't start automatically)
 if (require.main === module) {
     main();
 } 
