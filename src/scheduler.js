@@ -1,18 +1,23 @@
 /**
  * Stock Check Scheduler for Nintendo Switch 2 Stock Monitor
  * Runs stock checks every 30 minutes and sends alerts when stock becomes available
+ * Also handles daily summary emails at midnight
  */
 
 const cron = require('node-cron');
 const { checkStock } = require('./stockChecker.js');
-const { logStockCheck } = require('./dataLogger.js');
-const { sendStockAlert } = require('./emailService.js');
+const { logStockCheck, getLast24HourStats } = require('./dataLogger.js');
+const { sendStockAlert, sendDailySummary } = require('./emailService.js');
 const config = require('./config.js');
 
-// State management
+// State management for stock monitoring
 let monitoringTask = null;
 let lastKnownStatus = null;
 let isMonitoring = false;
+
+// State management for daily summaries
+let dailySummaryTask = null;
+let isDailySummaryRunning = false;
 
 /**
  * Perform a single stock check with logging and alert logic
@@ -161,7 +166,136 @@ function stopStockMonitoring() {
     }
 }
 
+/**
+ * Calculate yesterday's date in YYYY-MM-DD format
+ * @returns {string} Yesterday's date
+ */
+function getYesterdayDate() {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toISOString().split('T')[0];
+}
+
+/**
+ * Perform daily summary calculation and email sending
+ */
+async function performDailySummary() {
+    try {
+        const yesterdayDate = getYesterdayDate();
+        console.log(`📊 Generating daily summary for ${yesterdayDate}...`);
+        
+        // Step 1: Calculate statistics for yesterday
+        const statsResult = getLast24HourStats(yesterdayDate);
+        
+        if (!statsResult.success) {
+            console.error('❌ Failed to get daily statistics:', statsResult.error);
+            return;
+        }
+        
+        const stats = statsResult.data;
+        console.log(`📈 Yesterday's stats: ${stats.totalChecks} checks, ${stats.inStockCount} in stock, ${stats.statusChanges} changes`);
+        
+        // Step 2: Send daily summary email
+        try {
+            const summaryResult = await sendDailySummary(stats, yesterdayDate);
+            
+            if (summaryResult.success) {
+                console.log('📧 Daily summary email sent successfully');
+            } else {
+                console.error('❌ Failed to send daily summary:', summaryResult.error);
+            }
+        } catch (emailError) {
+            console.error('❌ Error sending daily summary:', emailError.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Daily summary failed:', error.message);
+    }
+}
+
+/**
+ * Start daily summary emails at midnight
+ * @returns {Object} Result object with success status
+ */
+function startDailySummary() {
+    if (isDailySummaryRunning) {
+        return {
+            success: false,
+            message: 'Daily summary is already running'
+        };
+    }
+    
+    try {
+        console.log('🌙 Starting daily summary scheduler...');
+        console.log('⏰ Schedule: Daily at midnight (00:00)');
+        
+        // Create cron task for midnight daily
+        dailySummaryTask = cron.schedule('0 0 * * *', performDailySummary, {
+            scheduled: false,
+            timezone: 'America/Los_Angeles' // Adjust timezone as needed
+        });
+        
+        // Start the task
+        dailySummaryTask.start();
+        isDailySummaryRunning = true;
+        
+        console.log('✅ Daily summary scheduler started');
+        
+        return {
+            success: true,
+            message: 'Daily summary scheduler started successfully'
+        };
+        
+    } catch (error) {
+        console.error('❌ Failed to start daily summary:', error.message);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Stop daily summary scheduler
+ * @returns {Object} Result object with success status
+ */
+function stopDailySummary() {
+    if (!isDailySummaryRunning) {
+        return {
+            success: false,
+            message: 'Daily summary is not running'
+        };
+    }
+    
+    try {
+        console.log('🛑 Stopping daily summary scheduler...');
+        
+        if (dailySummaryTask) {
+            dailySummaryTask.stop();
+            dailySummaryTask.destroy();
+            dailySummaryTask = null;
+        }
+        
+        isDailySummaryRunning = false;
+        console.log('✅ Daily summary scheduler stopped');
+        
+        return {
+            success: true,
+            message: 'Daily summary scheduler stopped successfully'
+        };
+        
+    } catch (error) {
+        console.error('❌ Failed to stop daily summary:', error.message);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
 module.exports = {
     startStockMonitoring,
-    stopStockMonitoring
+    stopStockMonitoring,
+    startDailySummary,
+    stopDailySummary
 }; 
