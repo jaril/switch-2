@@ -315,6 +315,426 @@ Happy gaming! 🎮✨
 }
 
 /**
+ * Send daily summary email with stock monitoring statistics
+ * @param {Object} summaryData - Summary data object
+ * @param {number} summaryData.totalChecks - Total number of checks performed
+ * @param {number} summaryData.inStockCount - Number of times product was in stock
+ * @param {number} summaryData.outOfStockCount - Number of times product was out of stock
+ * @param {string} summaryData.date - Date in YYYY-MM-DD format
+ * @param {Array} summaryData.checkHistory - Array of {timestamp, status} objects
+ * @returns {Promise<Object>} Result object with success status
+ */
+async function sendDailySummary(summaryData) {
+    try {
+        // Validate input parameters
+        if (!summaryData || typeof summaryData !== 'object') {
+            throw new Error('Summary data is required and must be an object');
+        }
+
+        const {
+            totalChecks = 0,
+            inStockCount = 0,
+            outOfStockCount = 0,
+            date = new Date().toISOString().split('T')[0],
+            checkHistory = []
+        } = summaryData;
+
+        // Validate required fields
+        if (typeof totalChecks !== 'number' || totalChecks < 0) {
+            throw new Error('totalChecks must be a non-negative number');
+        }
+
+        const reportTimestamp = new Date().toISOString();
+        const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+
+        const formattedReportTime = new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        // Calculate percentages
+        const inStockPercentage = totalChecks > 0 ? ((inStockCount / totalChecks) * 100).toFixed(1) : 0;
+        const outOfStockPercentage = totalChecks > 0 ? ((outOfStockCount / totalChecks) * 100).toFixed(1) : 0;
+
+        // Generate status changes timeline
+        const statusChanges = [];
+        if (checkHistory && checkHistory.length > 0) {
+            let lastStatus = null;
+            checkHistory.forEach(check => {
+                if (check.status !== lastStatus) {
+                    statusChanges.push({
+                        timestamp: check.timestamp,
+                        status: check.status,
+                        formattedTime: new Date(check.timestamp).toLocaleString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            timeZoneName: 'short'
+                        })
+                    });
+                    lastStatus = check.status;
+                }
+            });
+        }
+
+        // Subject line
+        const subject = `📊 Daily Stock Check Summary - ${formattedDate}`;
+
+        // HTML email template
+        const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Stock Check Summary</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f7;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 650px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            text-align: center;
+            padding: 30px 20px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .header .date {
+            margin: 10px 0 0 0;
+            font-size: 18px;
+            opacity: 0.9;
+        }
+        .content {
+            padding: 40px 30px;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 0 0 40px 0;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            padding: 25px 20px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+            transition: transform 0.2s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .stat-number {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 0 0 8px 0;
+            color: #2c3e50;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0;
+        }
+        .in-stock {
+            color: #28a745;
+        }
+        .out-of-stock {
+            color: #dc3545;
+        }
+        .section {
+            margin: 40px 0;
+        }
+        .section h2 {
+            font-size: 22px;
+            margin: 0 0 20px 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        .percentage-bar {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 30px;
+            margin: 15px 0;
+            overflow: hidden;
+            position: relative;
+        }
+        .percentage-fill {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            transition: width 0.3s ease;
+        }
+        .in-stock-bar {
+            background: linear-gradient(90deg, #28a745, #20c997);
+        }
+        .out-of-stock-bar {
+            background: linear-gradient(90deg, #dc3545, #c82333);
+        }
+        .timeline {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .timeline-item {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #e9ecef;
+        }
+        .timeline-item.in-stock {
+            border-left-color: #28a745;
+        }
+        .timeline-item.out-of-stock {
+            border-left-color: #dc3545;
+        }
+        .timeline-time {
+            font-weight: bold;
+            color: #6c757d;
+            min-width: 100px;
+            font-size: 14px;
+        }
+        .timeline-status {
+            margin-left: 15px;
+            font-weight: 500;
+        }
+        .timeline-status.in-stock {
+            color: #28a745;
+        }
+        .timeline-status.out-of-stock {
+            color: #dc3545;
+        }
+        .no-changes {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+            padding: 30px;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 25px;
+            text-align: center;
+            font-size: 14px;
+            color: #6c757d;
+            border-top: 1px solid #e9ecef;
+        }
+        .footer-time {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #868e96;
+        }
+        @media (max-width: 600px) {
+            .container {
+                margin: 0;
+                border-radius: 0;
+            }
+            .content {
+                padding: 30px 20px;
+            }
+            .summary-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            .stat-card {
+                padding: 20px 15px;
+            }
+            .timeline-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .timeline-time {
+                min-width: auto;
+                margin-bottom: 5px;
+            }
+            .timeline-status {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Daily Stock Summary</h1>
+            <div class="date">${formattedDate}</div>
+        </div>
+        
+        <div class="content">
+            <!-- Summary Statistics -->
+            <div class="summary-grid">
+                <div class="stat-card">
+                    <div class="stat-number">${totalChecks}</div>
+                    <div class="stat-label">Total Checks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number in-stock">${inStockCount}</div>
+                    <div class="stat-label">In Stock</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number out-of-stock">${outOfStockCount}</div>
+                    <div class="stat-label">Out of Stock</div>
+                </div>
+            </div>
+
+            <!-- Stock Status Breakdown -->
+            <div class="section">
+                <h2>📈 Stock Status Breakdown</h2>
+                
+                ${totalChecks > 0 ? `
+                <div style="margin: 20px 0;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <span><strong>In Stock:</strong> ${inStockPercentage}%</span>
+                        <span>${inStockCount} of ${totalChecks} checks</span>
+                    </div>
+                    <div class="percentage-bar">
+                        <div class="percentage-fill in-stock-bar" style="width: ${inStockPercentage}%;">
+                            ${inStockPercentage > 15 ? `${inStockPercentage}%` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin: 20px 0;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <span><strong>Out of Stock:</strong> ${outOfStockPercentage}%</span>
+                        <span>${outOfStockCount} of ${totalChecks} checks</span>
+                    </div>
+                    <div class="percentage-bar">
+                        <div class="percentage-fill out-of-stock-bar" style="width: ${outOfStockPercentage}%;">
+                            ${outOfStockPercentage > 15 ? `${outOfStockPercentage}%` : ''}
+                        </div>
+                    </div>
+                </div>
+                ` : `
+                <div class="no-changes">
+                    No stock checks performed today.
+                </div>
+                `}
+            </div>
+
+            <!-- Status Changes Timeline -->
+            <div class="section">
+                <h2>⏰ Stock Status Changes</h2>
+                
+                <div class="timeline">
+                    ${statusChanges.length > 0 ? 
+                        statusChanges.map(change => `
+                        <div class="timeline-item ${change.status}">
+                            <div class="timeline-time">${change.formattedTime}</div>
+                            <div class="timeline-status ${change.status}">
+                                ${change.status === 'in-stock' ? '🟢 Product became available' : '🔴 Product went out of stock'}
+                            </div>
+                        </div>
+                        `).join('') : `
+                        <div class="no-changes">
+                            No status changes detected today.
+                        </div>
+                    `}
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>This summary was generated by your Nintendo Switch 2 Stock Monitor.</p>
+            <div class="footer-time">Report generated: ${formattedReportTime}</div>
+        </div>
+    </div>
+</body>
+</html>`;
+
+        // Plain text version
+        const textContent = `
+📊 DAILY STOCK CHECK SUMMARY
+${formattedDate}
+${'='.repeat(50)}
+
+SUMMARY STATISTICS:
+• Total Checks: ${totalChecks}
+• In Stock: ${inStockCount} (${inStockPercentage}%)
+• Out of Stock: ${outOfStockCount} (${outOfStockPercentage}%)
+
+STOCK STATUS BREAKDOWN:
+${totalChecks > 0 ? `
+📈 Availability Rate: ${inStockPercentage}% in stock
+📉 Unavailability Rate: ${outOfStockPercentage}% out of stock
+
+In Stock: ${'█'.repeat(Math.floor(inStockPercentage / 5))}${'░'.repeat(20 - Math.floor(inStockPercentage / 5))} ${inStockPercentage}%
+Out of Stock: ${'█'.repeat(Math.floor(outOfStockPercentage / 5))}${'░'.repeat(20 - Math.floor(outOfStockPercentage / 5))} ${outOfStockPercentage}%
+` : 'No stock checks performed today.'}
+
+STOCK STATUS CHANGES:
+${statusChanges.length > 0 ? 
+    statusChanges.map(change => 
+        `• ${change.formattedTime} - ${change.status === 'in-stock' ? '🟢 Product became available' : '🔴 Product went out of stock'}`
+    ).join('\n') : '• No status changes detected today.'}
+
+${'='.repeat(50)}
+Report generated: ${formattedReportTime}
+Generated by Nintendo Switch 2 Stock Monitor
+`;
+
+        console.log(`📊 Sending daily summary for ${formattedDate}...`);
+
+        // Send the daily summary email
+        const result = await sendEmail(subject, htmlContent, textContent);
+
+        if (result.success) {
+            console.log('📈 Daily summary email sent successfully!');
+        } else {
+            console.log('❌ Failed to send daily summary email:', result.error);
+        }
+
+        return result;
+
+    } catch (error) {
+        const errorMessage = error.message || 'Failed to send daily summary';
+        console.error('❌ Daily summary error:', errorMessage);
+        
+        return {
+            success: false,
+            error: errorMessage,
+            timestamp: new Date().toISOString()
+        };
+    }
+}
+
+/**
  * Test email connection and configuration
  * Sends a basic test email to verify the service is working
  * @returns {Promise<Object>} Result object with success status
@@ -387,6 +807,7 @@ function getServiceInfo() {
 module.exports = {
     sendEmail,
     sendStockAlert,
+    sendDailySummary,
     testEmailConnection,
     getServiceInfo
 }; 
