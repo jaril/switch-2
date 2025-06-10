@@ -5,7 +5,7 @@
 
 const config = require('./config.js');
 const { checkStock } = require('./stockChecker.js');
-const { logStockCheck, getLast24HourStats, initializeDataLogger } = require('./dataLogger.js');
+const { logStockCheck, getLast24HourStats, initializeDataLogger, getAllLogs } = require('./dataLogger.js');
 const { sendStockAlert, sendDailySummary } = require('./emailService.js');
 const { startStockMonitoring, stopStockMonitoring, startDailySummary, stopDailySummary } = require('./scheduler.js');
 
@@ -181,6 +181,172 @@ class StockMonitorApp {
     }
 
     /**
+     * Perform integrated stock check with logging and email alerts
+     * This function orchestrates the complete check workflow
+     * @returns {Object} Summary of the stock check operation
+     */
+    async performStockCheck() {
+        const checkStart = new Date();
+        const result = {
+            timestamp: checkStart.toISOString(),
+            success: false,
+            stockStatus: null,
+            previousStatus: null,
+            statusChanged: false,
+            alertSent: false,
+            errors: [],
+            summary: ''
+        };
+
+        try {
+            console.log('🔍 Performing integrated stock check...');
+
+            // Step 1: Check current stock status
+            console.log('📡 Checking stock status...');
+            const stockResult = await checkStock(config.PRODUCT_URL);
+            
+            if (stockResult.error) {
+                result.errors.push(`Stock check failed: ${stockResult.error}`);
+                console.warn('⚠️ Stock check had errors:', stockResult.error);
+            }
+            
+            result.stockStatus = stockResult.inStock;
+            console.log(`📊 Current status: ${stockResult.inStock ? 'In Stock' : 'Out of Stock'}`);
+
+            // Step 2: Log the stock check result
+            console.log('📝 Logging stock check result...');
+            const logData = {
+                inStock: stockResult.inStock,
+                timestamp: stockResult.timestamp,
+                error: stockResult.error,
+                url: config.PRODUCT_URL
+            };
+
+            const logResult = logStockCheck(logData);
+            if (!logResult.success) {
+                result.errors.push(`Logging failed: ${logResult.error}`);
+                console.warn('⚠️ Failed to log stock check:', logResult.error);
+            } else {
+                console.log('✅ Stock check logged successfully');
+            }
+
+            // Step 3: Get previous status to detect changes
+            console.log('🔍 Checking for status changes...');
+            const previousStatus = this.getPreviousStockStatus();
+            result.previousStatus = previousStatus;
+
+            // Determine if status changed
+            if (previousStatus !== null) {
+                result.statusChanged = previousStatus !== stockResult.inStock;
+                
+                if (result.statusChanged) {
+                    const changeDesc = previousStatus 
+                        ? 'In Stock → Out of Stock' 
+                        : 'Out of Stock → In Stock';
+                    console.log(`🔄 Status changed: ${changeDesc}`);
+                } else {
+                    console.log('📊 Status unchanged');
+                }
+            } else {
+                console.log('🆕 First stock check - no previous status to compare');
+            }
+
+            // Step 4: Send email alert if stock became available
+            const shouldSendAlert = result.statusChanged && !previousStatus && stockResult.inStock;
+            
+            if (shouldSendAlert) {
+                console.log('🚨 Stock became available! Sending alert email...');
+                
+                try {
+                    const alertResult = await sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2');
+                    
+                    if (alertResult.success) {
+                        result.alertSent = true;
+                        console.log('📧 Stock alert email sent successfully');
+                    } else {
+                        result.errors.push(`Email alert failed: ${alertResult.error}`);
+                        console.error('❌ Failed to send stock alert:', alertResult.error);
+                    }
+                } catch (emailError) {
+                    result.errors.push(`Email alert error: ${emailError.message}`);
+                    console.error('❌ Error sending stock alert:', emailError.message);
+                }
+            } else if (result.statusChanged) {
+                console.log('ℹ️ Status changed but no alert needed (stock went out of stock)');
+            } else {
+                console.log('ℹ️ No alert needed (status unchanged)');
+            }
+
+            // Step 5: Generate summary
+            result.success = result.errors.length === 0;
+            const duration = Date.now() - checkStart.getTime();
+            
+            result.summary = this.generateCheckSummary(result, duration);
+            console.log('📋 ' + result.summary);
+
+            return result;
+
+        } catch (error) {
+            result.errors.push(`Unexpected error: ${error.message}`);
+            result.summary = `Stock check failed: ${error.message}`;
+            console.error('❌ Stock check failed with unexpected error:', error.message);
+            return result;
+        }
+    }
+
+    /**
+     * Get the previous stock status from recent logs
+     * @returns {boolean|null} Previous stock status or null if no previous data
+     */
+    getPreviousStockStatus() {
+        try {
+            const logsResult = getAllLogs();
+            
+            if (!logsResult.success || !logsResult.data || logsResult.data.length === 0) {
+                return null;
+            }
+
+            // Get the most recent log entry (excluding the one we just added)
+            const logs = logsResult.data;
+            if (logs.length < 2) {
+                return null; // Only one entry (the one we just added)
+            }
+
+            // Get the second-to-last entry (previous status)
+            const previousLog = logs[logs.length - 2];
+            return previousLog.inStock;
+
+        } catch (error) {
+            console.warn('⚠️ Could not determine previous status:', error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Generate a summary message for the stock check operation
+     */
+    generateCheckSummary(result, duration) {
+        const status = result.stockStatus ? 'In Stock' : 'Out of Stock';
+        const errorCount = result.errors.length;
+        
+        let summary = `Stock check completed in ${duration}ms - Status: ${status}`;
+        
+        if (result.statusChanged) {
+            summary += ', Status Changed';
+        }
+        
+        if (result.alertSent) {
+            summary += ', Alert Sent';
+        }
+        
+        if (errorCount > 0) {
+            summary += `, ${errorCount} Error${errorCount > 1 ? 's' : ''}`;
+        }
+        
+        return summary;
+    }
+
+    /**
      * Get application uptime
      */
     getUptime() {
@@ -236,7 +402,8 @@ async function main() {
 module.exports = {
     StockMonitorApp,
     app,
-    main
+    main,
+    performStockCheck: () => app.performStockCheck()
 };
 
 // Start application if this file is run directly
