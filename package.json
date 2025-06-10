@@ -5,7 +5,11 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node src/index.js"
+    "dev": "node src/index.js",
+    "stock-check": "node src/github-stock-check.js",
+    "daily-summary": "node src/github-daily-summary.js",
+    "health-check": "node src/github-health-check.js",
+    "notify-failure": "node src/github-notify-failure.js"
   },
   "author": "",
   "license": "MIT",

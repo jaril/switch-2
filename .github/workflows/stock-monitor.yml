@@ -1,0 +1,180 @@
+name: Nintendo Switch 2 Stock Monitor
+
+on:
+  # Stock check runs every 30 minutes
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes
+    - cron: '0 0 * * *'     # Daily summary at midnight UTC
+  
+  # Allow manual triggering for testing
+  workflow_dispatch:
+    inputs:
+      job_type:
+        description: 'Job type to run'
+        required: true
+        default: 'stock-check'
+        type: choice
+        options:
+          - stock-check
+          - daily-summary
+          - health-check
+
+jobs:
+  # Stock monitoring job - runs every 30 minutes
+  stock-check:
+    name: Stock Check
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/30 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_type == 'stock-check')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Create data directories
+        run: |
+          mkdir -p data logs
+          chmod 755 data logs
+          
+      - name: Run stock check
+        env:
+          PRODUCT_URL: ${{ secrets.PRODUCT_URL }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          STOCK_CHECK_INTERVAL: 30000  # Not used in one-shot mode
+          DAILY_SUMMARY_TIME: "00:00"  # Not used in one-shot mode
+          GITHUB_ACTIONS: "true"
+          NODE_ENV: "production"
+        run: npm run stock-check
+        
+      - name: Upload stock check logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-check-logs-${{ github.run_number }}
+          path: |
+            logs/
+            data/stock-checks.json
+          retention-days: 7
+          
+      - name: Notify on failure
+        if: failure()
+        env:
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: npm run notify-failure -- "Stock check workflow failed"
+
+  # Daily summary job - runs at midnight UTC
+  daily-summary:
+    name: Daily Summary
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_type == 'daily-summary')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Create data directories
+        run: |
+          mkdir -p data logs
+          chmod 755 data logs
+          
+      - name: Download previous stock data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stock-check-logs-*
+          path: ./artifacts
+          merge-multiple: true
+        continue-on-error: true
+        
+      - name: Merge stock check data
+        run: |
+          if [ -d "./artifacts" ]; then
+            # Merge all stock-checks.json files if they exist
+            find ./artifacts -name "stock-checks.json" -exec cat {} \; | jq -s 'add | unique_by(.timestamp) | sort_by(.timestamp)' > data/stock-checks.json 2>/dev/null || echo "[]" > data/stock-checks.json
+          else
+            echo "[]" > data/stock-checks.json
+          fi
+        
+      - name: Generate daily summary
+        env:
+          PRODUCT_URL: ${{ secrets.PRODUCT_URL }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          GITHUB_ACTIONS: "true"
+          NODE_ENV: "production"
+        run: npm run daily-summary
+        
+      - name: Upload summary logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-summary-logs-${{ github.run_number }}
+          path: |
+            logs/
+            data/
+          retention-days: 30
+          
+      - name: Notify on failure
+        if: failure()
+        env:
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: npm run notify-failure -- "Daily summary workflow failed"
+
+  # Health check job - manual trigger only
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job_type == 'health-check'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run health check
+        env:
+          PRODUCT_URL: ${{ secrets.PRODUCT_URL }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          GITHUB_ACTIONS: "true"
+        run: npm run health-check
+        
+      - name: Upload health check results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-check-results-${{ github.run_number }}
+          path: logs/
+          retention-days: 7 
