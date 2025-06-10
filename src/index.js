@@ -1,6 +1,6 @@
 /**
- * Nintendo Switch 2 Stock Monitor - Main Application Entry Point
- * Initializes all modules and manages application lifecycle
+ * Nintendo Switch 2 Stock Monitor - Main Application Entry Point with Error Handling & Resilience
+ * Initializes all modules and manages application lifecycle with comprehensive error handling
  */
 
 const config = require('./config.js');
@@ -9,8 +9,21 @@ const { logStockCheck, getLast24HourStats, initializeLogFile, getAllLogs } = req
 const { sendStockAlert, sendDailySummary } = require('./emailService.js');
 const { startStockMonitoring, stopStockMonitoring, startDailySummary, stopDailySummary } = require('./scheduler.js');
 
+// Enhanced error handling and resilience
+const {
+    ERROR_CATEGORIES,
+    logError,
+    retryWithBackoff,
+    CircuitBreaker,
+    EmailQueue,
+    HealthChecker,
+    LogRotator,
+    generateDailyErrorSummary,
+    initializeErrorLogging
+} = require('./errorHandler.js');
+
 /**
- * Main Application Class
+ * Main Application Class with Enhanced Error Handling & Resilience
  */
 class StockMonitorApp {
     constructor() {
@@ -25,7 +38,10 @@ class StockMonitorApp {
             isCheckInProgress: false,        // prevent overlapping checks
             dailySummaryLastSent: null,      // date string (YYYY-MM-DD)
             checkCount: 0,                   // total checks performed
-            lastStateUpdate: null            // when state was last modified
+            lastStateUpdate: null,           // when state was last modified
+            errorCount: 0,                   // total errors encountered
+            lastErrorTime: null,             // timestamp of last error
+            consecutiveFailures: 0           // consecutive stock check failures
         };
         
         // State lock for atomic operations
@@ -36,19 +52,62 @@ class StockMonitorApp {
         this.isStarting = false;
         this.isStopping = false;
         this.schedulersStarted = false;
+        
+        // Error handling and resilience components
+        this.emailCircuitBreaker = new CircuitBreaker({
+            name: 'email-service',
+            failureThreshold: 5,
+            timeout: 300000, // 5 minutes
+            monitoringPeriod: 60000 // 1 minute
+        });
+        
+        this.emailQueue = new EmailQueue({
+            maxQueueSize: 50,
+            retryDelay: 300000 // 5 minutes
+        });
+        
+        this.healthChecker = new HealthChecker();
+        
+        this.logRotator = new LogRotator({
+            maxDays: 30,
+            maxFileSize: 10 * 1024 * 1024 // 10MB
+        });
+        
+        // Error monitoring
+        this.errorRates = {
+            network: { count: 0, lastReset: Date.now() },
+            email: { count: 0, lastReset: Date.now() },
+            data: { count: 0, lastReset: Date.now() },
+            application: { count: 0, lastReset: Date.now() }
+        };
+        
+        // Setup unhandled error handlers
+        this.setupGlobalErrorHandlers();
+        
+        console.log('🛡️ Enhanced error handling and resilience initialized');
     }
 
     /**
-     * Initialize the application
+     * Initialize the application with enhanced error handling
      */
     async initialize() {
         try {
-            console.log('🎮 Nintendo Switch 2 Stock Monitor');
-            console.log('==================================');
+            console.log('🎮 Nintendo Switch 2 Stock Monitor with Enhanced Resilience');
+            console.log('=========================================================');
             console.log(`🚀 Starting application at ${new Date().toISOString()}`);
             console.log('');
 
-            // Step 1: Verify configuration
+            // Step 1: Initialize error logging
+            console.log('🚨 Initializing error logging system...');
+            const errorLoggingResult = initializeErrorLogging();
+            if (errorLoggingResult.success) {
+                console.log('✅ Error logging system initialized');
+            } else {
+                console.warn('⚠️ Error logging initialization warning:', errorLoggingResult.error);
+            }
+            console.log('');
+
+            // Step 2: Verify configuration
             console.log('⚙️  Verifying configuration...');
             this.verifyConfiguration();
             console.log('✅ Configuration loaded successfully');
@@ -56,48 +115,122 @@ class StockMonitorApp {
             console.log(`📧 Email configured: ${config.FROM_EMAIL} → ${config.TO_EMAIL}`);
             console.log('');
 
-            // Step 2: Initialize data logger
-            console.log('📊 Initializing data logger...');
-            const loggerResult = initializeLogFile();
+            // Step 3: Initialize data logger with resilience
+            console.log('📊 Initializing data logger with backup mechanisms...');
+            const loggerResult = await this.initializeDataLoggerWithResilience();
             if (loggerResult.success) {
-                console.log('✅ Data logger initialized successfully');
+                console.log('✅ Data logger initialized with resilience features');
                 console.log(`📁 Log directory: ${loggerResult.logDir}`);
             } else {
-                console.warn('⚠️  Data logger initialization warning:', loggerResult.error);
+                console.warn('⚠️ Data logger initialization warning:', loggerResult.error);
             }
             console.log('');
 
-            // Step 3: Verify module imports
+            // Step 4: Verify module imports
             console.log('🔧 Verifying module imports...');
             this.verifyModules();
             console.log('✅ All modules loaded successfully');
             console.log('');
 
-            // Step 4: Set up shutdown handlers
+            // Step 5: Set up health checks
+            console.log('🏥 Setting up health checks...');
+            this.setupHealthChecks();
+            console.log('✅ Health checks configured');
+            console.log('');
+
+            // Step 6: Set up shutdown handlers
             console.log('🛡️  Setting up shutdown handlers...');
             this.setupShutdownHandlers();
             console.log('✅ Shutdown handlers configured');
             console.log('');
 
+            // Step 7: Run initial health check
+            console.log('🔍 Running initial health check...');
+            const healthResult = await this.healthChecker.runChecks();
+            console.log(`✅ Initial health check completed - Status: ${healthResult.overall}`);
+            console.log('');
+
             this.isInitialized = true;
             this.startTime = new Date();
             
-            console.log('🎯 Application initialized successfully!');
+            console.log('🎯 Application initialized successfully with enhanced resilience!');
             console.log('📋 Available modules:');
-            console.log('   • Stock Checker - Ready for stock monitoring');
-            console.log('   • Email Service - Ready for notifications');
-            console.log('   • Data Logger - Ready for logging operations');
-            console.log('   • Scheduler - Ready for automated tasks');
+            console.log('   • Stock Checker - Ready with retry logic and timeout handling');
+            console.log('   • Email Service - Ready with circuit breaker and queue system');
+            console.log('   • Data Logger - Ready with backup and corruption recovery');
+            console.log('   • Scheduler - Ready with failure recovery');
+            console.log('   • Error Handler - Active monitoring and logging');
+            console.log('   • Health Checker - Continuous component monitoring');
             console.log('');
-            console.log('⏳ Application ready and waiting for instructions...');
+            console.log('⏳ Application ready with comprehensive error handling...');
             console.log('💡 Use scheduler functions to start monitoring and daily summaries');
             console.log('');
 
         } catch (error) {
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'application-initialization', {
+                step: 'initialization',
+                isInitialized: this.isInitialized
+            });
             console.error('❌ Application initialization failed:', error.message);
             console.error('🔍 Stack trace:', error.stack);
             throw error;
         }
+    }
+
+    /**
+     * Setup global error handlers for unhandled exceptions and rejections
+     */
+    setupGlobalErrorHandlers() {
+        // Handle unhandled promise rejections
+        process.on('unhandledRejection', (reason, promise) => {
+            const error = reason instanceof Error ? reason : new Error(String(reason));
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'unhandled-promise-rejection', {
+                promise: promise.toString(),
+                isShuttingDown: this.isShuttingDown
+            });
+            
+            console.error('🚨 Unhandled Promise Rejection:', error.message);
+            
+            // Don't exit immediately - try to continue operation
+            if (!this.isShuttingDown) {
+                console.log('🛡️ Application continuing despite unhandled rejection');
+            }
+        });
+        
+        // Handle uncaught exceptions
+        process.on('uncaughtException', (error) => {
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'uncaught-exception', {
+                critical: true,
+                willExit: true
+            });
+            
+            console.error('💥 Uncaught Exception:', error.message);
+            console.error('🔍 Stack trace:', error.stack);
+            console.error('🚨 Application will attempt graceful shutdown...');
+            
+            // Attempt graceful shutdown
+            this.shutdown('uncaught-exception')
+                .then(() => {
+                    console.log('✅ Graceful shutdown completed');
+                    process.exit(1);
+                })
+                .catch((shutdownError) => {
+                    console.error('❌ Graceful shutdown failed:', shutdownError.message);
+                    process.exit(1);
+                });
+        });
+        
+        // Handle memory warnings
+        process.on('warning', (warning) => {
+            if (warning.name === 'MaxListenersExceededWarning' || 
+                warning.message.includes('memory')) {
+                logError(warning, ERROR_CATEGORIES.APPLICATION, 'process-warning', {
+                    warningName: warning.name,
+                    warningCode: warning.code
+                });
+                console.warn('⚠️ Process warning:', warning.message);
+            }
+        });
     }
 
     /**
@@ -110,6 +243,201 @@ class StockMonitorApp {
         if (missing.length > 0) {
             throw new Error(`Missing required configuration: ${missing.join(', ')}`);
         }
+    }
+
+    /**
+     * Initialize data logger with resilience features
+     */
+    async initializeDataLoggerWithResilience() {
+        try {
+            // First attempt normal initialization
+            const loggerResult = initializeLogFile();
+            
+            if (loggerResult.success) {
+                // Setup backup mechanisms
+                await this.setupDataBackups();
+                
+                // Check for and recover from corruption
+                await this.checkAndRecoverCorruptedLogs();
+                
+                return {
+                    success: true,
+                    logDir: loggerResult.logDir,
+                    message: 'Data logger initialized with resilience features'
+                };
+            } else {
+                // Try recovery if initialization failed
+                console.log('🔄 Attempting data logger recovery...');
+                const recoveryResult = await this.recoverDataLogger();
+                
+                if (recoveryResult.success) {
+                    return {
+                        success: true,
+                        logDir: recoveryResult.logDir,
+                        message: 'Data logger recovered and initialized'
+                    };
+                } else {
+                    throw new Error(recoveryResult.error);
+                }
+            }
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.DATA, 'data-logger-initialization');
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Setup data backup mechanisms
+     */
+    async setupDataBackups() {
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            
+            const dataDir = path.join(__dirname, '..', 'data');
+            const backupDir = path.join(dataDir, 'backups');
+            
+            // Create backup directory
+            if (!fs.existsSync(backupDir)) {
+                fs.mkdirSync(backupDir, { recursive: true });
+            }
+            
+            console.log('💾 Data backup mechanisms initialized');
+            
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.DATA, 'backup-setup');
+            console.warn('⚠️ Backup setup failed:', error.message);
+        }
+    }
+
+    /**
+     * Check for and recover from corrupted log files
+     */
+    async checkAndRecoverCorruptedLogs() {
+        try {
+            const logs = getAllLogs();
+            
+            if (!logs.success && logs.error.includes('invalid')) {
+                console.log('🔧 Corrupted log file detected, attempting recovery...');
+                
+                const fs = require('fs');
+                const path = require('path');
+                
+                const logFile = path.join(__dirname, '..', 'data', 'stock-checks.json');
+                const backupFile = logFile + '.backup.' + Date.now();
+                
+                // Backup corrupted file
+                if (fs.existsSync(logFile)) {
+                    fs.renameSync(logFile, backupFile);
+                    console.log(`💾 Corrupted file backed up to: ${backupFile}`);
+                }
+                
+                // Initialize fresh log file
+                fs.writeFileSync(logFile, JSON.stringify([], null, 2));
+                console.log('✅ Log file recovered');
+                
+                logError(new Error('Log file corruption recovered'), ERROR_CATEGORIES.DATA, 'corruption-recovery', {
+                    backupFile,
+                    recoveryTime: new Date().toISOString()
+                });
+            }
+            
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.DATA, 'corruption-check');
+            console.warn('⚠️ Log corruption check failed:', error.message);
+        }
+    }
+
+    /**
+     * Recover data logger from failure
+     */
+    async recoverDataLogger() {
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            
+            const dataDir = path.join(__dirname, '..', 'data');
+            
+            // Ensure data directory exists
+            if (!fs.existsSync(dataDir)) {
+                fs.mkdirSync(dataDir, { recursive: true });
+            }
+            
+            // Try to initialize again
+            const result = initializeLogFile();
+            
+            if (result.success) {
+                console.log('✅ Data logger recovery successful');
+                return result;
+            } else {
+                throw new Error(result.error);
+            }
+            
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.DATA, 'data-logger-recovery');
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Setup health checks for critical components
+     */
+    setupHealthChecks() {
+        // Stock checker health check
+        this.healthChecker.registerCheck('stock-checker', async () => {
+            // Test with a simple request timeout
+            const testUrl = 'https://httpbin.org/status/200';
+            const axios = require('axios');
+            
+            try {
+                const response = await axios.get(testUrl, { timeout: 3000 });
+                return { status: 'healthy', responseTime: response.headers.date };
+            } catch (error) {
+                throw new Error(`Stock checker network test failed: ${error.message}`);
+            }
+        }, { timeout: 5000 });
+        
+        // Data logger health check
+        this.healthChecker.registerCheck('data-logger', async () => {
+            const logs = getAllLogs();
+            if (logs.success) {
+                return { status: 'healthy', totalLogs: logs.totalCount };
+            } else {
+                throw new Error(`Data logger unhealthy: ${logs.error}`);
+            }
+        });
+        
+        // Email circuit breaker health check
+        this.healthChecker.registerCheck('email-circuit-breaker', async () => {
+            const status = this.emailCircuitBreaker.getStatus();
+            if (status.state === 'open') {
+                throw new Error(`Email circuit breaker is open (${status.failureCount} failures)`);
+            }
+            return status;
+        });
+        
+        // Application state health check
+        this.healthChecker.registerCheck('application-state', async () => {
+            const state = this.getApplicationState();
+            
+            // Check for excessive consecutive failures
+            if (state.consecutiveFailures > 10) {
+                throw new Error(`Too many consecutive failures: ${state.consecutiveFailures}`);
+            }
+            
+            return {
+                status: 'healthy',
+                consecutiveFailures: state.consecutiveFailures,
+                checkCount: state.checkCount,
+                errorCount: state.errorCount
+            };
+        });
     }
 
     /**
@@ -678,6 +1006,243 @@ class StockMonitorApp {
     /**
      * Graceful shutdown (updated to use application lifecycle)
      */
+
+    /**
+     * Update consecutive failures count
+     */
+    async updateConsecutiveFailures(failed) {
+        try {
+            await this.waitForStateLock();
+            await this.acquireStateLock();
+            
+            if (failed) {
+                this.applicationState.consecutiveFailures++;
+            } else {
+                this.applicationState.consecutiveFailures = 0;
+            }
+            
+            this.applicationState.lastStateUpdate = new Date().toISOString();
+            this.releaseStateLock();
+            
+        } catch (error) {
+            this.releaseStateLock();
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'consecutive-failures-update');
+        }
+    }
+
+    /**
+     * Update error counts by category
+     */
+    async updateErrorCounts(category) {
+        try {
+            await this.waitForStateLock();
+            await this.acquireStateLock();
+            
+            this.applicationState.errorCount++;
+            this.applicationState.lastErrorTime = new Date().toISOString();
+            this.applicationState.lastStateUpdate = new Date().toISOString();
+            
+            // Update category-specific error rates
+            if (this.errorRates[category]) {
+                this.errorRates[category].count++;
+                
+                // Reset hourly if needed
+                const hourAgo = Date.now() - (60 * 60 * 1000);
+                if (this.errorRates[category].lastReset < hourAgo) {
+                    this.errorRates[category].count = 1;
+                    this.errorRates[category].lastReset = Date.now();
+                }
+            }
+            
+            this.releaseStateLock();
+            
+        } catch (error) {
+            this.releaseStateLock();
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'error-count-update');
+        }
+    }
+
+    /**
+     * Perform stock check with retry logic and exponential backoff
+     */
+    async performStockCheckWithRetry() {
+        return await retryWithBackoff(
+            async () => {
+                const result = await checkStock(config.PRODUCT_URL);
+                
+                // If there's an error, throw it to trigger retry
+                if (result.error) {
+                    const error = new Error(result.error);
+                    error.isNetworkError = result.error.includes('timeout') || 
+                                          result.error.includes('network') ||
+                                          result.error.includes('ENOTFOUND') ||
+                                          result.error.includes('ECONNREFUSED');
+                    throw error;
+                }
+                
+                return result;
+            },
+            {
+                maxAttempts: 3,
+                baseDelay: 2000,
+                maxDelay: 10000,
+                backoffFactor: 2,
+                context: 'stock-check',
+                category: ERROR_CATEGORIES.NETWORK
+            }
+        );
+    }
+
+    /**
+     * Update stock status with resilience
+     */
+    async updateStockStatusWithResilience(newStatus, timestamp) {
+        try {
+            return await this.updateStockStatus(newStatus, timestamp);
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'state-update-resilience');
+            
+            // Try once more after a short delay
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            try {
+                return await this.updateStockStatus(newStatus, timestamp);
+            } catch (retryError) {
+                logError(retryError, ERROR_CATEGORIES.APPLICATION, 'state-update-retry-failed');
+                return {
+                    success: false,
+                    error: `State update failed after retry: ${retryError.message}`
+                };
+            }
+        }
+    }
+
+    /**
+     * Log stock check with resilience and backup mechanisms
+     */
+    async logStockCheckWithResilience(logData) {
+        try {
+            // First attempt normal logging
+            let result = logStockCheck(logData);
+            
+            if (result.success) {
+                return result;
+            }
+            
+            // If logging failed, try backup mechanisms
+            console.log('🔄 Primary logging failed, attempting backup...');
+            
+            // Create backup log entry
+            const backupDir = require('path').join(__dirname, '..', 'data', 'backups');
+            const fs = require('fs');
+            
+            if (!fs.existsSync(backupDir)) {
+                fs.mkdirSync(backupDir, { recursive: true });
+            }
+            
+            const backupFile = require('path').join(backupDir, `backup-${Date.now()}.json`);
+            fs.writeFileSync(backupFile, JSON.stringify(logData, null, 2));
+            
+            logError(new Error(result.error), ERROR_CATEGORIES.DATA, 'primary-logging-failed', {
+                backupFile,
+                logData
+            });
+            
+            console.log(`💾 Stock check backed up to: ${backupFile}`);
+            
+            return {
+                success: true,
+                message: 'Logged to backup file',
+                backupFile
+            };
+            
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.DATA, 'logging-resilience-failed');
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Send email with circuit breaker and resilience
+     */
+    async sendEmailWithResilience(emailFunction, emailType) {
+        try {
+            return await this.emailCircuitBreaker.execute(async () => {
+                return await retryWithBackoff(
+                    emailFunction,
+                    {
+                        maxAttempts: 2,
+                        baseDelay: 1000,
+                        maxDelay: 5000,
+                        context: `email-${emailType}`,
+                        category: ERROR_CATEGORIES.EMAIL
+                    }
+                );
+            });
+        } catch (error) {
+            await this.updateErrorCounts('email');
+            
+            logError(error, ERROR_CATEGORIES.EMAIL, `email-resilience-${emailType}`, {
+                circuitBreakerState: this.emailCircuitBreaker.getStatus().state
+            });
+            
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Queue failed email for retry
+     */
+    queueFailedEmail(emailType, emailData) {
+        try {
+            console.log(`📬 Queueing failed email: ${emailType}`);
+            this.emailQueue.enqueue(emailData);
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.EMAIL, 'email-queue-failed');
+            console.error('❌ Failed to queue email:', error.message);
+        }
+    }
+
+    /**
+     * Perform maintenance tasks like log rotation and error summary
+     */
+    async performMaintenance() {
+        try {
+            console.log('🔧 Performing maintenance tasks...');
+            
+            // Rotate logs if needed
+            await this.logRotator.rotateLogs();
+            
+            // Generate daily error summary
+            await generateDailyErrorSummary();
+            
+            // Run health checks
+            const healthResult = await this.healthChecker.runChecks();
+            
+            if (healthResult.overall !== 'healthy') {
+                console.warn(`⚠️ Health check warning: ${healthResult.overall}`);
+                logError(
+                    new Error(`Health checks indicate ${healthResult.overall} status`),
+                    ERROR_CATEGORIES.APPLICATION,
+                    'health-check-warning',
+                    healthResult
+                );
+            }
+            
+            console.log('✅ Maintenance tasks completed');
+            
+        } catch (error) {
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'maintenance-failure');
+            console.error('❌ Maintenance tasks failed:', error.message);
+        }
+    }
+
     async shutdown(reason) {
         if (this.isShuttingDown) {
             return;
@@ -691,6 +1256,9 @@ class StockMonitorApp {
             console.log(`🔍 Reason: ${reason}`);
             console.log('');
 
+            // Perform final maintenance tasks
+            await this.performMaintenance();
+
             // Use the new stopApplication method
             const stopResult = await this.stopApplication(30000);
             
@@ -703,6 +1271,7 @@ class StockMonitorApp {
             
         } catch (error) {
             console.error('❌ Error during shutdown:', error.message);
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'shutdown-error', { reason });
         } finally {
             console.log('👋 Process terminating...');
             process.exit(0);
@@ -748,41 +1317,71 @@ class StockMonitorApp {
                 result.previousStatus = previousStatus;
                 console.log(`📊 Previous status: ${previousStatus === null ? 'None' : (previousStatus ? 'In Stock' : 'Out of Stock')}`);
 
-                // Step 3: Check current stock status
-                console.log('📡 Checking stock status...');
-                const stockResult = await checkStock(config.PRODUCT_URL);
+                // Step 3: Check current stock status with retry logic
+                console.log('📡 Checking stock status with resilience...');
+                let stockResult;
                 
-                if (stockResult.error) {
-                    result.errors.push(`Stock check failed: ${stockResult.error}`);
-                    console.warn('⚠️ Stock check had errors:', stockResult.error);
+                try {
+                    stockResult = await this.performStockCheckWithRetry();
+                    console.log('✅ Stock check completed successfully');
+                    
+                    // Reset consecutive failures on success
+                    await this.updateConsecutiveFailures(false);
+                } catch (error) {
+                    // Handle stock check failure with resilience
+                    stockResult = {
+                        inStock: false,
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    result.errors.push(`Stock check failed after retries: ${error.message}`);
+                    console.warn('⚠️ Stock check failed after all retries:', error.message);
+                    
+                    // Update consecutive failures
+                    await this.updateConsecutiveFailures(true);
+                    await this.updateErrorCounts('network');
+                    
+                    logError(error, ERROR_CATEGORIES.NETWORK, 'stock-check-final-failure', {
+                        consecutiveFailures: this.applicationState.consecutiveFailures
+                    });
                 }
                 
                 result.stockStatus = stockResult.inStock;
                 console.log(`📊 Current status: ${stockResult.inStock ? 'In Stock' : 'Out of Stock'}`);
 
-                // Step 4: Update application state with new status
-                console.log('🔄 Updating application state...');
-                const stateResult = await this.updateStockStatus(stockResult.inStock, stockResult.timestamp);
+                // Step 4: Update application state with resilience
+                console.log('🔄 Updating application state with resilience...');
+                const stateResult = await this.updateStockStatusWithResilience(stockResult.inStock, stockResult.timestamp);
                 if (!stateResult.success) {
                     result.errors.push(`State update failed: ${stateResult.error}`);
-                    console.warn('⚠️ Failed to update application state:', stateResult.error);
+                    console.warn('⚠️ Failed to update application state with resilience:', stateResult.error);
+                    await this.updateErrorCounts('application');
+                } else {
+                    console.log('✅ Application state updated successfully');
                 }
 
-                // Step 5: Log the stock check result
-                console.log('📝 Logging stock check result...');
+                // Step 5: Log the stock check result with backup mechanisms
+                console.log('📝 Logging stock check result with resilience...');
                 const logData = {
                     inStock: stockResult.inStock,
                     timestamp: stockResult.timestamp,
                     error: stockResult.error,
-                    url: config.PRODUCT_URL
+                    url: config.PRODUCT_URL,
+                    retryAttempts: stockResult.retryAttempts || 0,
+                    consecutiveFailures: this.applicationState.consecutiveFailures
                 };
 
-                const logResult = logStockCheck(logData);
+                const logResult = await this.logStockCheckWithResilience(logData);
                 if (!logResult.success) {
                     result.errors.push(`Logging failed: ${logResult.error}`);
-                    console.warn('⚠️ Failed to log stock check:', logResult.error);
+                    console.warn('⚠️ Failed to log stock check even with resilience:', logResult.error);
+                    await this.updateErrorCounts('data');
                 } else {
                     console.log('✅ Stock check logged successfully');
+                    if (logResult.backupFile) {
+                        console.log(`💾 Used backup logging: ${logResult.backupFile}`);
+                    }
                 }
 
                 // Step 6: Detect status changes using state
@@ -801,25 +1400,31 @@ class StockMonitorApp {
                     console.log('🆕 First stock check - no previous status to compare');
                 }
 
-                // Step 7: Send email alert if stock became available
+                // Step 7: Send email alert if stock became available with circuit breaker
                 const shouldSendAlert = result.statusChanged && !previousStatus && stockResult.inStock;
                 
                 if (shouldSendAlert) {
-                    console.log('🚨 Stock became available! Sending alert email...');
+                    console.log('🚨 Stock became available! Sending alert email with resilience...');
                     
-                    try {
-                        const alertResult = await sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2');
+                    const alertResult = await this.sendEmailWithResilience(
+                        async () => await sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2'),
+                        'stock-alert'
+                    );
+                    
+                    if (alertResult.success) {
+                        result.alertSent = true;
+                        console.log('📧 Stock alert email sent successfully');
+                    } else {
+                        result.errors.push(`Email alert failed: ${alertResult.error}`);
+                        console.error('❌ Failed to send stock alert with resilience:', alertResult.error);
                         
-                        if (alertResult.success) {
-                            result.alertSent = true;
-                            console.log('📧 Stock alert email sent successfully');
-                        } else {
-                            result.errors.push(`Email alert failed: ${alertResult.error}`);
-                            console.error('❌ Failed to send stock alert:', alertResult.error);
-                        }
-                    } catch (emailError) {
-                        result.errors.push(`Email alert error: ${emailError.message}`);
-                        console.error('❌ Error sending stock alert:', emailError.message);
+                        // Queue email for retry if circuit breaker prevents immediate sending
+                        this.queueFailedEmail('stock-alert', {
+                            subject: '🎮 Nintendo Switch 2 is IN STOCK at Costco!',
+                            productUrl: config.PRODUCT_URL,
+                            productName: 'Nintendo Switch 2',
+                            sendFunction: () => sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2')
+                        });
                     }
                 } else if (result.statusChanged) {
                     console.log('ℹ️ Status changed but no alert needed (stock went out of stock)');
@@ -846,16 +1451,29 @@ class StockMonitorApp {
             return result;
 
         } catch (error) {
+            // Enhanced error handling with comprehensive logging
+            logError(error, ERROR_CATEGORIES.APPLICATION, 'stock-check-unexpected', {
+                wasInProgress: this.applicationState.isCheckInProgress,
+                previousStatus: result.previousStatus,
+                errorCount: this.applicationState.errorCount
+            });
+            
+            // Update error counts
+            await this.updateErrorCounts('application');
+            
             // Ensure lock is released on error
             try {
                 await this.setCheckInProgress(false);
             } catch (unlockError) {
                 console.error('❌ Failed to release lock on error:', unlockError.message);
+                logError(unlockError, ERROR_CATEGORIES.APPLICATION, 'lock-release-failure');
             }
             
             result.errors.push(`Unexpected error: ${error.message}`);
             result.summary = `Stock check failed: ${error.message}`;
             console.error('❌ Stock check failed with unexpected error:', error.message);
+            console.error('🔍 Stack trace:', error.stack);
+            
             return result;
         }
     }
