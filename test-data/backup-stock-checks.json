@@ -106,11 +106,5 @@
     "inStock": false,
     "error": "Request timeout - server took too long to respond",
     "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
-  },
-  {
-    "timestamp": "2025-06-10T23:37:51.784Z",
-    "inStock": false,
-    "error": null,
-    "url": null
   }
 ]

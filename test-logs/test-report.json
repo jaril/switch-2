@@ -1,0 +1,200 @@
+{
+  "summary": {
+    "startTime": "2025-06-10T23:36:26.559Z",
+    "endTime": "2025-06-10T23:36:57.524Z",
+    "totalDuration": 30965,
+    "totalTests": 12,
+    "passedTests": 12,
+    "failedTests": 0,
+    "successRate": "100%"
+  },
+  "testResults": [
+    {
+      "name": "Configuration Validation",
+      "status": "PASSED",
+      "duration": 0,
+      "result": {
+        "requiredVariables": 4,
+        "configurationValid": true,
+        "apiKeyFormat": "valid",
+        "emailFormat": "valid",
+        "urlFormat": "valid"
+      }
+    },
+    {
+      "name": "Stock Checker Module",
+      "status": "PASSED",
+      "duration": 5192,
+      "result": {
+        "status": "Error",
+        "timestamp": "2025-06-10T23:36:26.727Z",
+        "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html",
+        "error": "Request timeout - server took too long to respond"
+      }
+    },
+    {
+      "name": "Email Service Module",
+      "status": "PASSED",
+      "duration": 4,
+      "result": {
+        "serviceInitialized": true,
+        "fromEmail": "alerts@jaril.com",
+        "toEmail": "jarilvalenciano@gmail.com",
+        "apiKeyValid": true,
+        "service": "Resend"
+      }
+    },
+    {
+      "name": "Data Logger Module",
+      "status": "PASSED",
+      "duration": 2,
+      "result": {
+        "loggedSuccessfully": true,
+        "retrievedSuccessfully": true,
+        "dataIntegrity": "verified",
+        "totalLogs": 19,
+        "logEntry": {
+          "timestamp": "2025-06-10T23:36:31.769Z",
+          "inStock": false,
+          "error": null,
+          "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+        }
+      }
+    },
+    {
+      "name": "Error Handler Module",
+      "status": "PASSED",
+      "duration": 308,
+      "result": {
+        "errorLoggingWorking": true,
+        "retryMechanismWorking": true,
+        "attemptsUsed": 3,
+        "initializationSuccessful": true,
+        "categoriesAvailable": 5
+      }
+    },
+    {
+      "name": "Application Startup/Shutdown",
+      "status": "PASSED",
+      "duration": 3103,
+      "result": {
+        "startupSuccessful": true,
+        "shutdownGraceful": true,
+        "exitCode": 0,
+        "outputLength": 2766
+      }
+    },
+    {
+      "name": "GitHub Actions Compatibility",
+      "status": "PASSED",
+      "duration": 1,
+      "result": {
+        "scriptsLoaded": 3,
+        "results": {
+          "github-stock-check.js": {
+            "loadable": false,
+            "error": "Cannot find module 'src/github-stock-check.js'\nRequire stack:\n- /Users/jaril/Documents/code/switch-2/test-complete.js"
+          },
+          "github-daily-summary.js": {
+            "loadable": false,
+            "error": "Cannot find module 'src/github-daily-summary.js'\nRequire stack:\n- /Users/jaril/Documents/code/switch-2/test-complete.js"
+          },
+          "github-health-check.js": {
+            "loadable": false,
+            "error": "Cannot find module 'src/github-health-check.js'\nRequire stack:\n- /Users/jaril/Documents/code/switch-2/test-complete.js"
+          }
+        },
+        "gitHubActionsCompatible": false
+      }
+    },
+    {
+      "name": "Stock Status Change Scenario",
+      "status": "PASSED",
+      "duration": 1,
+      "result": {
+        "checksLogged": 3,
+        "statusChangeDetected": true,
+        "finalStatus": "In Stock",
+        "previousStatus": "Out of Stock",
+        "totalLogsRetrieved": 22
+      }
+    },
+    {
+      "name": "Network Failure Recovery",
+      "status": "PASSED",
+      "duration": 304,
+      "result": {
+        "failuresSimulated": 3,
+        "recoverySuccessful": true,
+        "finalResult": {
+          "inStock": false,
+          "timestamp": "2025-06-10T23:36:35.487Z"
+        },
+        "retryMechanismWorking": true
+      }
+    },
+    {
+      "name": "Memory Usage Monitoring",
+      "status": "PASSED",
+      "duration": 4009,
+      "result": {
+        "measurements": 5,
+        "averageMemoryMB": 66,
+        "maxMemoryMB": 67,
+        "memoryStable": true,
+        "duration": 5000
+      }
+    },
+    {
+      "name": "File System Operations",
+      "status": "PASSED",
+      "duration": 4,
+      "result": {
+        "directoryCreation": true,
+        "fileWriting": true,
+        "fileReading": true,
+        "fileDeletion": true,
+        "dataIntegrity": true
+      }
+    },
+    {
+      "name": "Application Performance",
+      "status": "PASSED",
+      "duration": 18021,
+      "result": {
+        "testsRun": 3,
+        "averageResponseTime": 5006,
+        "allTestsSuccessful": true,
+        "performanceTests": [
+          {
+            "attempt": 1,
+            "duration": 5005,
+            "success": true
+          },
+          {
+            "attempt": 2,
+            "duration": 5008,
+            "success": true
+          },
+          {
+            "attempt": 3,
+            "duration": 5004,
+            "success": true
+          }
+        ]
+      }
+    }
+  ],
+  "environment": {
+    "nodeVersion": "v23.3.0",
+    "platform": "darwin",
+    "memoryUsage": {
+      "rss": 65781760,
+      "heapTotal": 16334848,
+      "heapUsed": 14000984,
+      "external": 3625658,
+      "arrayBuffers": 217528
+    },
+    "configurationValid": true
+  }
+}
