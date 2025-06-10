@@ -22,5 +22,89 @@
     "inStock": true,
     "error": null,
     "url": "test-url"
+  },
+  {
+    "timestamp": "2025-06-10T22:38:36.650Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:06.700Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:22.748Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:27.764Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:37.773Z",
+    "inStock": true,
+    "error": null,
+    "url": "validation-test"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:37.778Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:43.297Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:48.811Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:39:54.332Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:41:50.913Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
+  },
+  {
+    "timestamp": "2025-06-10T22:41:56.929Z",
+    "inStock": true,
+    "error": null,
+    "url": "test-1"
+  },
+  {
+    "timestamp": "2025-06-10T22:41:56.929Z",
+    "inStock": false,
+    "error": null,
+    "url": "test-2"
+  },
+  {
+    "timestamp": "2025-06-10T22:41:56.929Z",
+    "inStock": true,
+    "error": null,
+    "url": "test-3"
+  },
+  {
+    "timestamp": "2025-06-10T22:41:56.947Z",
+    "inStock": false,
+    "error": "Request timeout - server took too long to respond",
+    "url": "https://www.costco.com/nintendo-switch-2--mario-kart-world-bundle.product.4000369992.html"
   }
 ]
