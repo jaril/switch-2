@@ -288,10 +288,326 @@ function getLogFileStats() {
     }
 }
 
+/**
+ * Calculate statistics for a specific date
+ * @param {string} date - Date in YYYY-MM-DD format
+ * @returns {Object} Statistics object for the specified date
+ */
+function calculateDailyStats(date) {
+    try {
+        // Validate date parameter
+        if (!date || typeof date !== 'string') {
+            throw new Error('Date is required and must be a string in YYYY-MM-DD format');
+        }
+
+        // Validate date format (YYYY-MM-DD)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date)) {
+            throw new Error('Date must be in YYYY-MM-DD format');
+        }
+
+        // Parse and validate the date
+        const targetDate = new Date(date + 'T00:00:00.000Z');
+        if (isNaN(targetDate.getTime())) {
+            throw new Error('Invalid date provided');
+        }
+
+        // Get date boundaries (start and end of day in UTC)
+        const startOfDay = new Date(date + 'T00:00:00.000Z');
+        const endOfDay = new Date(date + 'T23:59:59.999Z');
+
+        console.log(`📊 Calculating daily stats for ${date}...`);
+
+        // Get all logs and filter for the specific date
+        const allLogsResult = getAllLogs();
+        if (!allLogsResult.success) {
+            throw new Error(`Failed to read logs: ${allLogsResult.error}`);
+        }
+
+        // Filter logs for the specific date
+        const dayLogs = allLogsResult.logs.filter(log => {
+            try {
+                const logDate = new Date(log.timestamp);
+                return logDate >= startOfDay && logDate <= endOfDay;
+            } catch (parseError) {
+                console.warn(`⚠️ Skipping log with invalid timestamp: ${log.timestamp}`);
+                return false;
+            }
+        });
+
+        // Sort logs by timestamp (oldest first for accurate status change detection)
+        dayLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Calculate basic statistics
+        const totalChecks = dayLogs.length;
+        const inStockCount = dayLogs.filter(log => log.inStock === true).length;
+        const outOfStockCount = dayLogs.filter(log => log.inStock === false).length;
+
+        // Find status changes
+        const statusChanges = [];
+        let lastStatus = null;
+
+        dayLogs.forEach(log => {
+            const currentStatus = log.inStock ? 'in-stock' : 'out-of-stock';
+            
+            if (lastStatus !== null && lastStatus !== currentStatus) {
+                statusChanges.push({
+                    timestamp: log.timestamp,
+                    from: lastStatus,
+                    to: currentStatus
+                });
+            }
+            
+            lastStatus = currentStatus;
+        });
+
+        // Get first and last check timestamps
+        const firstCheck = dayLogs.length > 0 ? dayLogs[0].timestamp : null;
+        const lastCheck = dayLogs.length > 0 ? dayLogs[dayLogs.length - 1].timestamp : null;
+
+        const stats = {
+            date: date,
+            totalChecks: totalChecks,
+            inStockCount: inStockCount,
+            outOfStockCount: outOfStockCount,
+            statusChanges: statusChanges,
+            firstCheck: firstCheck,
+            lastCheck: lastCheck
+        };
+
+        console.log(`✅ Daily stats calculated: ${totalChecks} checks, ${statusChanges.length} status changes`);
+
+        return {
+            success: true,
+            stats: stats,
+            timestamp: new Date().toISOString()
+        };
+
+    } catch (error) {
+        const errorMessage = `Failed to calculate daily stats: ${error.message}`;
+        console.error('❌', errorMessage);
+        
+        return {
+            success: false,
+            error: errorMessage,
+            stats: null,
+            timestamp: new Date().toISOString()
+        };
+    }
+}
+
+/**
+ * Get statistics for the last 24 hours from now
+ * @returns {Object} Statistics object for the last 24 hours
+ */
+function getLast24HourStats() {
+    try {
+        const now = new Date();
+        const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+
+        console.log(`📊 Calculating last 24 hour stats from ${twentyFourHoursAgo.toISOString()}...`);
+
+        // Get all logs and filter for the last 24 hours
+        const allLogsResult = getAllLogs();
+        if (!allLogsResult.success) {
+            throw new Error(`Failed to read logs: ${allLogsResult.error}`);
+        }
+
+        // Filter logs for the last 24 hours
+        const recentLogs = allLogsResult.logs.filter(log => {
+            try {
+                const logDate = new Date(log.timestamp);
+                return logDate >= twentyFourHoursAgo && logDate <= now;
+            } catch (parseError) {
+                console.warn(`⚠️ Skipping log with invalid timestamp: ${log.timestamp}`);
+                return false;
+            }
+        });
+
+        // Sort logs by timestamp (oldest first for accurate status change detection)
+        recentLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Calculate basic statistics
+        const totalChecks = recentLogs.length;
+        const inStockCount = recentLogs.filter(log => log.inStock === true).length;
+        const outOfStockCount = recentLogs.filter(log => log.inStock === false).length;
+
+        // Find status changes in the last 24 hours
+        const statusChanges = [];
+        let lastStatus = null;
+
+        recentLogs.forEach(log => {
+            const currentStatus = log.inStock ? 'in-stock' : 'out-of-stock';
+            
+            if (lastStatus !== null && lastStatus !== currentStatus) {
+                statusChanges.push({
+                    timestamp: log.timestamp,
+                    from: lastStatus,
+                    to: currentStatus
+                });
+            }
+            
+            lastStatus = currentStatus;
+        });
+
+        // Get first and last check timestamps
+        const firstCheck = recentLogs.length > 0 ? recentLogs[0].timestamp : null;
+        const lastCheck = recentLogs.length > 0 ? recentLogs[recentLogs.length - 1].timestamp : null;
+
+        // Format the date range for display
+        const dateRange = `${twentyFourHoursAgo.toISOString().split('T')[0]} to ${now.toISOString().split('T')[0]}`;
+
+        const stats = {
+            date: dateRange,
+            totalChecks: totalChecks,
+            inStockCount: inStockCount,
+            outOfStockCount: outOfStockCount,
+            statusChanges: statusChanges,
+            firstCheck: firstCheck,
+            lastCheck: lastCheck,
+            periodStart: twentyFourHoursAgo.toISOString(),
+            periodEnd: now.toISOString()
+        };
+
+        console.log(`✅ Last 24h stats calculated: ${totalChecks} checks, ${statusChanges.length} status changes`);
+
+        return {
+            success: true,
+            stats: stats,
+            timestamp: new Date().toISOString()
+        };
+
+    } catch (error) {
+        const errorMessage = `Failed to calculate last 24 hour stats: ${error.message}`;
+        console.error('❌', errorMessage);
+        
+        return {
+            success: false,
+            error: errorMessage,
+            stats: null,
+            timestamp: new Date().toISOString()
+        };
+    }
+}
+
+/**
+ * Get stock status changes for a specific date
+ * @param {string} date - Date in YYYY-MM-DD format
+ * @returns {Object} Array of status changes for the specified date
+ */
+function getStatusChanges(date) {
+    try {
+        // Validate date parameter
+        if (!date || typeof date !== 'string') {
+            throw new Error('Date is required and must be a string in YYYY-MM-DD format');
+        }
+
+        // Validate date format (YYYY-MM-DD)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date)) {
+            throw new Error('Date must be in YYYY-MM-DD format');
+        }
+
+        // Parse and validate the date
+        const targetDate = new Date(date + 'T00:00:00.000Z');
+        if (isNaN(targetDate.getTime())) {
+            throw new Error('Invalid date provided');
+        }
+
+        console.log(`🔄 Finding status changes for ${date}...`);
+
+        // Get date boundaries (start and end of day in UTC)
+        const startOfDay = new Date(date + 'T00:00:00.000Z');
+        const endOfDay = new Date(date + 'T23:59:59.999Z');
+
+        // Get all logs and filter for the specific date
+        const allLogsResult = getAllLogs();
+        if (!allLogsResult.success) {
+            throw new Error(`Failed to read logs: ${allLogsResult.error}`);
+        }
+
+        // Filter logs for the specific date
+        const dayLogs = allLogsResult.logs.filter(log => {
+            try {
+                const logDate = new Date(log.timestamp);
+                return logDate >= startOfDay && logDate <= endOfDay;
+            } catch (parseError) {
+                console.warn(`⚠️ Skipping log with invalid timestamp: ${log.timestamp}`);
+                return false;
+            }
+        });
+
+        // Sort logs by timestamp (oldest first for accurate status change detection)
+        dayLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Find status changes with detailed information
+        const statusChanges = [];
+        let lastStatus = null;
+        let lastLog = null;
+
+        dayLogs.forEach((log, index) => {
+            const currentStatus = log.inStock ? 'in-stock' : 'out-of-stock';
+            
+            if (lastStatus !== null && lastStatus !== currentStatus) {
+                const change = {
+                    timestamp: log.timestamp,
+                    from: lastStatus,
+                    to: currentStatus,
+                    formattedTime: new Date(log.timestamp).toLocaleString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        timeZoneName: 'short'
+                    }),
+                    sequenceNumber: statusChanges.length + 1,
+                    previousLogTimestamp: lastLog ? lastLog.timestamp : null
+                };
+                
+                statusChanges.push(change);
+            }
+            
+            lastStatus = currentStatus;
+            lastLog = log;
+        });
+
+        // Add summary information
+        const summary = {
+            date: date,
+            totalChanges: statusChanges.length,
+            totalLogs: dayLogs.length,
+            firstLogStatus: dayLogs.length > 0 ? (dayLogs[0].inStock ? 'in-stock' : 'out-of-stock') : null,
+            lastLogStatus: dayLogs.length > 0 ? (dayLogs[dayLogs.length - 1].inStock ? 'in-stock' : 'out-of-stock') : null
+        };
+
+        console.log(`✅ Found ${statusChanges.length} status changes on ${date}`);
+
+        return {
+            success: true,
+            statusChanges: statusChanges,
+            summary: summary,
+            timestamp: new Date().toISOString()
+        };
+
+    } catch (error) {
+        const errorMessage = `Failed to get status changes: ${error.message}`;
+        console.error('❌', errorMessage);
+        
+        return {
+            success: false,
+            error: errorMessage,
+            statusChanges: [],
+            summary: null,
+            timestamp: new Date().toISOString()
+        };
+    }
+}
+
 module.exports = {
     logStockCheck,
     getAllLogs,
     getLogsSince,
     initializeLogFile,
-    getLogFileStats
+    getLogFileStats,
+    calculateDailyStats,
+    getLast24HourStats,
+    getStatusChanges
 }; 
