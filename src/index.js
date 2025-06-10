@@ -5,7 +5,7 @@
 
 const config = require('./config.js');
 const { checkStock } = require('./stockChecker.js');
-const { logStockCheck, getLast24HourStats, initializeDataLogger, getAllLogs } = require('./dataLogger.js');
+const { logStockCheck, getLast24HourStats, initializeLogFile, getAllLogs } = require('./dataLogger.js');
 const { sendStockAlert, sendDailySummary } = require('./emailService.js');
 const { startStockMonitoring, stopStockMonitoring, startDailySummary, stopDailySummary } = require('./scheduler.js');
 
@@ -58,7 +58,7 @@ class StockMonitorApp {
 
             // Step 2: Initialize data logger
             console.log('📊 Initializing data logger...');
-            const loggerResult = initializeDataLogger();
+            const loggerResult = initializeLogFile();
             if (loggerResult.success) {
                 console.log('✅ Data logger initialized successfully');
                 console.log(`📁 Log directory: ${loggerResult.logDir}`);
