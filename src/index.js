@@ -17,6 +17,19 @@ class StockMonitorApp {
         this.isInitialized = false;
         this.isShuttingDown = false;
         this.startTime = null;
+        
+        // Application state for cross-module coordination
+        this.applicationState = {
+            lastStockStatus: null,           // boolean or null
+            lastCheckTime: null,             // timestamp
+            isCheckInProgress: false,        // prevent overlapping checks
+            dailySummaryLastSent: null,      // date string (YYYY-MM-DD)
+            checkCount: 0,                   // total checks performed
+            lastStateUpdate: null            // when state was last modified
+        };
+        
+        // State lock for atomic operations
+        this.stateLock = false;
     }
 
     /**
@@ -113,6 +126,190 @@ class StockMonitorApp {
     }
 
     /**
+     * Wait for state lock to be available (prevents race conditions)
+     * @param {number} timeout - Maximum wait time in milliseconds
+     * @returns {Promise<boolean>} True if lock acquired, false if timeout
+     */
+    async waitForStateLock(timeout = 5000) {
+        const start = Date.now();
+        while (this.stateLock && (Date.now() - start) < timeout) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        return !this.stateLock;
+    }
+
+    /**
+     * Acquire state lock for atomic operations
+     * @returns {boolean} True if lock acquired successfully
+     */
+    async acquireStateLock() {
+        if (this.stateLock) {
+            return false;
+        }
+        this.stateLock = true;
+        return true;
+    }
+
+    /**
+     * Release state lock
+     */
+    releaseStateLock() {
+        this.stateLock = false;
+    }
+
+    /**
+     * Get current application state (read-only copy)
+     * @returns {Object} Copy of current application state
+     */
+    getApplicationState() {
+        return {
+            ...this.applicationState,
+            stateLocked: this.stateLock
+        };
+    }
+
+    /**
+     * Update stock status in application state atomically
+     * @param {boolean} newStatus - New stock status
+     * @param {string} timestamp - Timestamp of the check
+     * @returns {Object} Result object with success status
+     */
+    async updateStockStatus(newStatus, timestamp) {
+        try {
+            // Wait for state lock
+            const lockAcquired = await this.waitForStateLock();
+            if (!lockAcquired) {
+                return {
+                    success: false,
+                    error: 'Failed to acquire state lock for stock status update'
+                };
+            }
+
+            await this.acquireStateLock();
+            
+            // Update state atomically
+            this.applicationState.lastStockStatus = newStatus;
+            this.applicationState.lastCheckTime = timestamp;
+            this.applicationState.checkCount++;
+            this.applicationState.lastStateUpdate = new Date().toISOString();
+            
+            this.releaseStateLock();
+            
+            return {
+                success: true,
+                previousStatus: this.applicationState.lastStockStatus,
+                newStatus: newStatus,
+                checkCount: this.applicationState.checkCount
+            };
+            
+        } catch (error) {
+            this.releaseStateLock();
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Set check in progress status (prevents overlapping checks)
+     * @param {boolean} inProgress - Whether check is in progress
+     * @returns {Object} Result object with success status
+     */
+    async setCheckInProgress(inProgress) {
+        try {
+            const lockAcquired = await this.waitForStateLock();
+            if (!lockAcquired) {
+                return {
+                    success: false,
+                    error: 'Failed to acquire state lock for check status update'
+                };
+            }
+
+            await this.acquireStateLock();
+            
+            // Prevent setting in progress if already in progress
+            if (inProgress && this.applicationState.isCheckInProgress) {
+                this.releaseStateLock();
+                return {
+                    success: false,
+                    error: 'Stock check already in progress'
+                };
+            }
+            
+            this.applicationState.isCheckInProgress = inProgress;
+            this.applicationState.lastStateUpdate = new Date().toISOString();
+            
+            this.releaseStateLock();
+            
+            return {
+                success: true,
+                isCheckInProgress: inProgress
+            };
+            
+        } catch (error) {
+            this.releaseStateLock();
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
+     * Get last stock status for change detection
+     * @returns {boolean|null} Last known stock status
+     */
+    getLastStockStatus() {
+        return this.applicationState.lastStockStatus;
+    }
+
+    /**
+     * Check if daily summary was already sent today
+     * @param {string} date - Date in YYYY-MM-DD format
+     * @returns {boolean} True if summary already sent for this date
+     */
+    isDailySummarySent(date) {
+        return this.applicationState.dailySummaryLastSent === date;
+    }
+
+    /**
+     * Update daily summary sent status
+     * @param {string} date - Date in YYYY-MM-DD format
+     * @returns {Object} Result object with success status
+     */
+    async updateDailySummarySent(date) {
+        try {
+            const lockAcquired = await this.waitForStateLock();
+            if (!lockAcquired) {
+                return {
+                    success: false,
+                    error: 'Failed to acquire state lock for daily summary update'
+                };
+            }
+
+            await this.acquireStateLock();
+            
+            this.applicationState.dailySummaryLastSent = date;
+            this.applicationState.lastStateUpdate = new Date().toISOString();
+            
+            this.releaseStateLock();
+            
+            return {
+                success: true,
+                date: date
+            };
+            
+        } catch (error) {
+            this.releaseStateLock();
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    /**
      * Set up graceful shutdown handling
      */
     setupShutdownHandlers() {
@@ -182,7 +379,7 @@ class StockMonitorApp {
 
     /**
      * Perform integrated stock check with logging and email alerts
-     * This function orchestrates the complete check workflow
+     * This function orchestrates the complete check workflow with state management
      * @returns {Object} Summary of the stock check operation
      */
     async performStockCheck() {
@@ -195,89 +392,119 @@ class StockMonitorApp {
             statusChanged: false,
             alertSent: false,
             errors: [],
-            summary: ''
+            summary: '',
+            wasBlocked: false
         };
 
         try {
             console.log('🔍 Performing integrated stock check...');
 
-            // Step 1: Check current stock status
-            console.log('📡 Checking stock status...');
-            const stockResult = await checkStock(config.PRODUCT_URL);
-            
-            if (stockResult.error) {
-                result.errors.push(`Stock check failed: ${stockResult.error}`);
-                console.warn('⚠️ Stock check had errors:', stockResult.error);
-            }
-            
-            result.stockStatus = stockResult.inStock;
-            console.log(`📊 Current status: ${stockResult.inStock ? 'In Stock' : 'Out of Stock'}`);
-
-            // Step 2: Log the stock check result
-            console.log('📝 Logging stock check result...');
-            const logData = {
-                inStock: stockResult.inStock,
-                timestamp: stockResult.timestamp,
-                error: stockResult.error,
-                url: config.PRODUCT_URL
-            };
-
-            const logResult = logStockCheck(logData);
-            if (!logResult.success) {
-                result.errors.push(`Logging failed: ${logResult.error}`);
-                console.warn('⚠️ Failed to log stock check:', logResult.error);
-            } else {
-                console.log('✅ Stock check logged successfully');
+            // Step 1: Check if another check is in progress (prevent race conditions)
+            console.log('🔒 Checking for concurrent operations...');
+            const lockResult = await this.setCheckInProgress(true);
+            if (!lockResult.success) {
+                result.wasBlocked = true;
+                result.errors.push('Check blocked: ' + lockResult.error);
+                result.summary = 'Stock check blocked - another check in progress';
+                console.warn('⚠️ Stock check blocked:', lockResult.error);
+                return result;
             }
 
-            // Step 3: Get previous status to detect changes
-            console.log('🔍 Checking for status changes...');
-            const previousStatus = this.getPreviousStockStatus();
-            result.previousStatus = previousStatus;
+            try {
+                // Step 2: Get previous status from application state
+                const previousStatus = this.getLastStockStatus();
+                result.previousStatus = previousStatus;
+                console.log(`📊 Previous status: ${previousStatus === null ? 'None' : (previousStatus ? 'In Stock' : 'Out of Stock')}`);
 
-            // Determine if status changed
-            if (previousStatus !== null) {
-                result.statusChanged = previousStatus !== stockResult.inStock;
+                // Step 3: Check current stock status
+                console.log('📡 Checking stock status...');
+                const stockResult = await checkStock(config.PRODUCT_URL);
                 
-                if (result.statusChanged) {
-                    const changeDesc = previousStatus 
-                        ? 'In Stock → Out of Stock' 
-                        : 'Out of Stock → In Stock';
-                    console.log(`🔄 Status changed: ${changeDesc}`);
+                if (stockResult.error) {
+                    result.errors.push(`Stock check failed: ${stockResult.error}`);
+                    console.warn('⚠️ Stock check had errors:', stockResult.error);
+                }
+                
+                result.stockStatus = stockResult.inStock;
+                console.log(`📊 Current status: ${stockResult.inStock ? 'In Stock' : 'Out of Stock'}`);
+
+                // Step 4: Update application state with new status
+                console.log('🔄 Updating application state...');
+                const stateResult = await this.updateStockStatus(stockResult.inStock, stockResult.timestamp);
+                if (!stateResult.success) {
+                    result.errors.push(`State update failed: ${stateResult.error}`);
+                    console.warn('⚠️ Failed to update application state:', stateResult.error);
+                }
+
+                // Step 5: Log the stock check result
+                console.log('📝 Logging stock check result...');
+                const logData = {
+                    inStock: stockResult.inStock,
+                    timestamp: stockResult.timestamp,
+                    error: stockResult.error,
+                    url: config.PRODUCT_URL
+                };
+
+                const logResult = logStockCheck(logData);
+                if (!logResult.success) {
+                    result.errors.push(`Logging failed: ${logResult.error}`);
+                    console.warn('⚠️ Failed to log stock check:', logResult.error);
                 } else {
-                    console.log('📊 Status unchanged');
+                    console.log('✅ Stock check logged successfully');
                 }
-            } else {
-                console.log('🆕 First stock check - no previous status to compare');
-            }
 
-            // Step 4: Send email alert if stock became available
-            const shouldSendAlert = result.statusChanged && !previousStatus && stockResult.inStock;
-            
-            if (shouldSendAlert) {
-                console.log('🚨 Stock became available! Sending alert email...');
-                
-                try {
-                    const alertResult = await sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2');
+                // Step 6: Detect status changes using state
+                if (previousStatus !== null) {
+                    result.statusChanged = previousStatus !== stockResult.inStock;
                     
-                    if (alertResult.success) {
-                        result.alertSent = true;
-                        console.log('📧 Stock alert email sent successfully');
+                    if (result.statusChanged) {
+                        const changeDesc = previousStatus 
+                            ? 'In Stock → Out of Stock' 
+                            : 'Out of Stock → In Stock';
+                        console.log(`🔄 Status changed: ${changeDesc}`);
                     } else {
-                        result.errors.push(`Email alert failed: ${alertResult.error}`);
-                        console.error('❌ Failed to send stock alert:', alertResult.error);
+                        console.log('📊 Status unchanged');
                     }
-                } catch (emailError) {
-                    result.errors.push(`Email alert error: ${emailError.message}`);
-                    console.error('❌ Error sending stock alert:', emailError.message);
+                } else {
+                    console.log('🆕 First stock check - no previous status to compare');
                 }
-            } else if (result.statusChanged) {
-                console.log('ℹ️ Status changed but no alert needed (stock went out of stock)');
-            } else {
-                console.log('ℹ️ No alert needed (status unchanged)');
+
+                // Step 7: Send email alert if stock became available
+                const shouldSendAlert = result.statusChanged && !previousStatus && stockResult.inStock;
+                
+                if (shouldSendAlert) {
+                    console.log('🚨 Stock became available! Sending alert email...');
+                    
+                    try {
+                        const alertResult = await sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2');
+                        
+                        if (alertResult.success) {
+                            result.alertSent = true;
+                            console.log('📧 Stock alert email sent successfully');
+                        } else {
+                            result.errors.push(`Email alert failed: ${alertResult.error}`);
+                            console.error('❌ Failed to send stock alert:', alertResult.error);
+                        }
+                    } catch (emailError) {
+                        result.errors.push(`Email alert error: ${emailError.message}`);
+                        console.error('❌ Error sending stock alert:', emailError.message);
+                    }
+                } else if (result.statusChanged) {
+                    console.log('ℹ️ Status changed but no alert needed (stock went out of stock)');
+                } else {
+                    console.log('ℹ️ No alert needed (status unchanged)');
+                }
+
+            } finally {
+                // Always release the check lock
+                const unlockResult = await this.setCheckInProgress(false);
+                if (!unlockResult.success) {
+                    result.errors.push(`Failed to release check lock: ${unlockResult.error}`);
+                    console.warn('⚠️ Failed to release check lock:', unlockResult.error);
+                }
             }
 
-            // Step 5: Generate summary
+            // Step 8: Generate summary
             result.success = result.errors.length === 0;
             const duration = Date.now() - checkStart.getTime();
             
@@ -287,6 +514,13 @@ class StockMonitorApp {
             return result;
 
         } catch (error) {
+            // Ensure lock is released on error
+            try {
+                await this.setCheckInProgress(false);
+            } catch (unlockError) {
+                console.error('❌ Failed to release lock on error:', unlockError.message);
+            }
+            
             result.errors.push(`Unexpected error: ${error.message}`);
             result.summary = `Stock check failed: ${error.message}`;
             console.error('❌ Stock check failed with unexpected error:', error.message);
@@ -294,38 +528,16 @@ class StockMonitorApp {
         }
     }
 
-    /**
-     * Get the previous stock status from recent logs
-     * @returns {boolean|null} Previous stock status or null if no previous data
-     */
-    getPreviousStockStatus() {
-        try {
-            const logsResult = getAllLogs();
-            
-            if (!logsResult.success || !logsResult.data || logsResult.data.length === 0) {
-                return null;
-            }
 
-            // Get the most recent log entry (excluding the one we just added)
-            const logs = logsResult.data;
-            if (logs.length < 2) {
-                return null; // Only one entry (the one we just added)
-            }
-
-            // Get the second-to-last entry (previous status)
-            const previousLog = logs[logs.length - 2];
-            return previousLog.inStock;
-
-        } catch (error) {
-            console.warn('⚠️ Could not determine previous status:', error.message);
-            return null;
-        }
-    }
 
     /**
      * Generate a summary message for the stock check operation
      */
     generateCheckSummary(result, duration) {
+        if (result.wasBlocked) {
+            return `Stock check blocked in ${duration}ms - concurrent check in progress`;
+        }
+        
         const status = result.stockStatus ? 'In Stock' : 'Out of Stock';
         const errorCount = result.errors.length;
         
@@ -348,7 +560,7 @@ class StockMonitorApp {
 
     /**
      * Perform daily summary calculation and email sending
-     * This function orchestrates the complete daily summary workflow
+     * This function orchestrates the complete daily summary workflow with state management
      * @returns {Object} Summary of the daily summary operation
      */
     async performDailySummary() {
@@ -359,6 +571,7 @@ class StockMonitorApp {
             date: null,
             statsRetrieved: false,
             emailSent: false,
+            alreadySent: false,
             errors: [],
             summary: ''
         };
@@ -371,7 +584,16 @@ class StockMonitorApp {
             result.date = yesterdayDate;
             console.log(`📅 Generating summary for ${yesterdayDate}`);
 
-            // Step 2: Get 24-hour statistics
+            // Step 2: Check if summary was already sent for this date
+            console.log('🔍 Checking if summary already sent...');
+            if (this.isDailySummarySent(yesterdayDate)) {
+                result.alreadySent = true;
+                result.summary = `Daily summary already sent for ${yesterdayDate}`;
+                console.log('ℹ️ Daily summary already sent for this date, skipping');
+                return result;
+            }
+
+            // Step 3: Get 24-hour statistics
             console.log('📈 Retrieving 24-hour statistics...');
             const statsResult = getLast24HourStats(yesterdayDate);
             
@@ -385,7 +607,7 @@ class StockMonitorApp {
             const stats = statsResult.data;
             console.log(`📊 Stats retrieved: ${stats.totalChecks} checks, ${stats.inStockCount} in stock, ${stats.statusChanges} changes`);
 
-            // Step 3: Send daily summary email
+            // Step 4: Send daily summary email
             console.log('📧 Sending daily summary email...');
             try {
                 const summaryResult = await sendDailySummary(stats, yesterdayDate, 'Nintendo Switch 2');
@@ -393,6 +615,14 @@ class StockMonitorApp {
                 if (summaryResult.success) {
                     result.emailSent = true;
                     console.log('✅ Daily summary email sent successfully');
+
+                    // Step 5: Update state to prevent duplicate sends
+                    console.log('🔄 Updating daily summary state...');
+                    const stateResult = await this.updateDailySummarySent(yesterdayDate);
+                    if (!stateResult.success) {
+                        result.errors.push(`State update failed: ${stateResult.error}`);
+                        console.warn('⚠️ Failed to update daily summary state:', stateResult.error);
+                    }
                 } else {
                     result.errors.push(`Email sending failed: ${summaryResult.error}`);
                     console.error('❌ Failed to send daily summary:', summaryResult.error);
@@ -402,7 +632,7 @@ class StockMonitorApp {
                 console.error('❌ Error sending daily summary:', emailError.message);
             }
 
-            // Step 4: Generate summary
+            // Step 6: Generate summary
             result.success = result.errors.length === 0;
             const duration = Date.now() - summaryStart.getTime();
             
@@ -434,6 +664,10 @@ class StockMonitorApp {
      */
     generateDailySummary(result, duration) {
         const errorCount = result.errors.length;
+        
+        if (result.alreadySent) {
+            return `Daily summary skipped - already sent for ${result.date}`;
+        }
         
         let summary = `Daily summary completed in ${duration}ms for ${result.date}`;
         
@@ -510,7 +744,8 @@ module.exports = {
     app,
     main,
     performStockCheck: () => app.performStockCheck(),
-    performDailySummary: () => app.performDailySummary()
+    performDailySummary: () => app.performDailySummary(),
+    getApplicationState: () => app.getApplicationState()
 };
 
 // Start application if this file is run directly
