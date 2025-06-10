@@ -1,0 +1,8 @@
+{
+  "name": "nintendo-switch-monitor",
+  "version": "1.0.0",
+  "description": "A Node.js application that monitors Nintendo Switch 2 stock availability at Costco",
+  "main": "src/index.js",
+  "author": "",
+  "license": "MIT"
+} 
