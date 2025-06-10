@@ -82,6 +82,239 @@ async function sendEmail(subject, htmlContent, textContent = null) {
 }
 
 /**
+ * Send stock alert email when product becomes available
+ * @param {string} productUrl - URL of the product page
+ * @param {string} productName - Name of the product
+ * @returns {Promise<Object>} Result object with success status
+ */
+async function sendStockAlert(productUrl, productName = 'Nintendo Switch 2') {
+    try {
+        // Validate input parameters
+        if (!productUrl || typeof productUrl !== 'string') {
+            throw new Error('Product URL is required and must be a string');
+        }
+
+        const timestamp = new Date().toISOString();
+        const formattedTime = new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+
+        // Subject line
+        const subject = '🎮 Nintendo Switch 2 is IN STOCK at Costco!';
+
+        // HTML email template
+        const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nintendo Switch 2 Stock Alert</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #0066cc, #004499);
+            color: white;
+            text-align: center;
+            padding: 30px 20px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .content {
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .product-name {
+            font-size: 24px;
+            color: #333;
+            font-weight: bold;
+            margin: 0 0 20px 0;
+        }
+        .alert-message {
+            font-size: 18px;
+            color: #28a745;
+            font-weight: bold;
+            margin: 0 0 30px 0;
+            padding: 15px;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+        }
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            text-decoration: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            font-size: 18px;
+            font-weight: bold;
+            margin: 20px 0;
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+        }
+        .cta-button:hover {
+            background: linear-gradient(135deg, #218838, #1e7e34);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
+        }
+        .product-url {
+            font-size: 14px;
+            color: #666;
+            word-break: break-all;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .timestamp {
+            font-size: 14px;
+            color: #666;
+            margin: 20px 0;
+            font-style: italic;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            border-top: 1px solid #e9ecef;
+        }
+        .urgency {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        @media (max-width: 600px) {
+            .container {
+                margin: 0;
+                border-radius: 0;
+            }
+            .header h1 {
+                font-size: 24px;
+            }
+            .content {
+                padding: 20px 15px;
+            }
+            .cta-button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 STOCK ALERT! 🎮</h1>
+        </div>
+        
+        <div class="content">
+            <div class="product-name">${productName}</div>
+            
+            <div class="alert-message">
+                🟢 NOW AVAILABLE AT COSTCO!
+            </div>
+            
+            <div class="urgency">
+                ⚡ Act Fast! Nintendo Switch 2 stock moves quickly!
+            </div>
+            
+            <a href="${productUrl}" class="cta-button">
+                🛒 SHOP NOW AT COSTCO
+            </a>
+            
+            <div class="product-url">
+                <strong>Direct Link:</strong><br>
+                <a href="${productUrl}" style="color: #0066cc;">${productUrl}</a>
+            </div>
+            
+            <div class="timestamp">
+                ⏰ Stock detected on: ${formattedTime}
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>This alert was generated by your Nintendo Switch 2 Stock Monitor.</p>
+            <p>Happy gaming! 🎮✨</p>
+        </div>
+    </div>
+</body>
+</html>`;
+
+        // Plain text version
+        const textContent = `
+🎮 NINTENDO SWITCH 2 STOCK ALERT! 🎮
+
+${productName} is NOW AVAILABLE at Costco!
+
+🟢 IN STOCK: Act fast, Nintendo Switch 2 stock moves quickly!
+
+🛒 SHOP NOW: ${productUrl}
+
+⏰ Stock detected on: ${formattedTime}
+
+Direct link: ${productUrl}
+
+This alert was generated by your Nintendo Switch 2 Stock Monitor.
+Happy gaming! 🎮✨
+`;
+
+        console.log(`🚨 Sending stock alert for ${productName}...`);
+
+        // Send the stock alert email
+        const result = await sendEmail(subject, htmlContent, textContent);
+
+        if (result.success) {
+            console.log('🎉 Stock alert email sent successfully!');
+        } else {
+            console.log('❌ Failed to send stock alert email:', result.error);
+        }
+
+        return result;
+
+    } catch (error) {
+        const errorMessage = error.message || 'Failed to send stock alert';
+        console.error('❌ Stock alert error:', errorMessage);
+        
+        return {
+            success: false,
+            error: errorMessage,
+            timestamp: new Date().toISOString()
+        };
+    }
+}
+
+/**
  * Test email connection and configuration
  * Sends a basic test email to verify the service is working
  * @returns {Promise<Object>} Result object with success status
@@ -153,6 +386,7 @@ function getServiceInfo() {
 
 module.exports = {
     sendEmail,
+    sendStockAlert,
     testEmailConnection,
     getServiceInfo
 }; 
