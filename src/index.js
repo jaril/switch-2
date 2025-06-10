@@ -347,6 +347,112 @@ class StockMonitorApp {
     }
 
     /**
+     * Perform daily summary calculation and email sending
+     * This function orchestrates the complete daily summary workflow
+     * @returns {Object} Summary of the daily summary operation
+     */
+    async performDailySummary() {
+        const summaryStart = new Date();
+        const result = {
+            timestamp: summaryStart.toISOString(),
+            success: false,
+            date: null,
+            statsRetrieved: false,
+            emailSent: false,
+            errors: [],
+            summary: ''
+        };
+
+        try {
+            console.log('📊 Performing daily summary...');
+
+            // Step 1: Calculate yesterday's date
+            const yesterdayDate = this.getYesterdayDate();
+            result.date = yesterdayDate;
+            console.log(`📅 Generating summary for ${yesterdayDate}`);
+
+            // Step 2: Get 24-hour statistics
+            console.log('📈 Retrieving 24-hour statistics...');
+            const statsResult = getLast24HourStats(yesterdayDate);
+            
+            if (!statsResult.success) {
+                result.errors.push(`Statistics retrieval failed: ${statsResult.error}`);
+                console.error('❌ Failed to get daily statistics:', statsResult.error);
+                return result;
+            }
+
+            result.statsRetrieved = true;
+            const stats = statsResult.data;
+            console.log(`📊 Stats retrieved: ${stats.totalChecks} checks, ${stats.inStockCount} in stock, ${stats.statusChanges} changes`);
+
+            // Step 3: Send daily summary email
+            console.log('📧 Sending daily summary email...');
+            try {
+                const summaryResult = await sendDailySummary(stats, yesterdayDate, 'Nintendo Switch 2');
+                
+                if (summaryResult.success) {
+                    result.emailSent = true;
+                    console.log('✅ Daily summary email sent successfully');
+                } else {
+                    result.errors.push(`Email sending failed: ${summaryResult.error}`);
+                    console.error('❌ Failed to send daily summary:', summaryResult.error);
+                }
+            } catch (emailError) {
+                result.errors.push(`Email error: ${emailError.message}`);
+                console.error('❌ Error sending daily summary:', emailError.message);
+            }
+
+            // Step 4: Generate summary
+            result.success = result.errors.length === 0;
+            const duration = Date.now() - summaryStart.getTime();
+            
+            result.summary = this.generateDailySummary(result, duration);
+            console.log('📋 ' + result.summary);
+
+            return result;
+
+        } catch (error) {
+            result.errors.push(`Unexpected error: ${error.message}`);
+            result.summary = `Daily summary failed: ${error.message}`;
+            console.error('❌ Daily summary failed with unexpected error:', error.message);
+            return result;
+        }
+    }
+
+    /**
+     * Calculate yesterday's date in YYYY-MM-DD format
+     * @returns {string} Yesterday's date
+     */
+    getYesterdayDate() {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        return yesterday.toISOString().split('T')[0];
+    }
+
+    /**
+     * Generate a summary message for the daily summary operation
+     */
+    generateDailySummary(result, duration) {
+        const errorCount = result.errors.length;
+        
+        let summary = `Daily summary completed in ${duration}ms for ${result.date}`;
+        
+        if (result.statsRetrieved) {
+            summary += ', Stats Retrieved';
+        }
+        
+        if (result.emailSent) {
+            summary += ', Email Sent';
+        }
+        
+        if (errorCount > 0) {
+            summary += `, ${errorCount} Error${errorCount > 1 ? 's' : ''}`;
+        }
+        
+        return summary;
+    }
+
+    /**
      * Get application uptime
      */
     getUptime() {
@@ -403,7 +509,8 @@ module.exports = {
     StockMonitorApp,
     app,
     main,
-    performStockCheck: () => app.performStockCheck()
+    performStockCheck: () => app.performStockCheck(),
+    performDailySummary: () => app.performDailySummary()
 };
 
 // Start application if this file is run directly

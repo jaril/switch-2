@@ -2,92 +2,45 @@
  * Stock Check Scheduler for Nintendo Switch 2 Stock Monitor
  * Runs stock checks every 30 minutes and sends alerts when stock becomes available
  * Also handles daily summary emails at midnight
+ * Uses integrated workflow functions from main application
  */
 
 const cron = require('node-cron');
-const { checkStock } = require('./stockChecker.js');
-const { logStockCheck, getLast24HourStats } = require('./dataLogger.js');
-const { sendStockAlert, sendDailySummary } = require('./emailService.js');
-const config = require('./config.js');
 
 // State management for stock monitoring
 let monitoringTask = null;
-let lastKnownStatus = null;
 let isMonitoring = false;
+let performStockCheckFn = null;
 
 // State management for daily summaries
 let dailySummaryTask = null;
 let isDailySummaryRunning = false;
+let performDailySummaryFn = null;
 
 /**
- * Perform a single stock check with logging and alert logic
+ * Wrapper for scheduled stock check using integrated workflow
  */
-async function performStockCheck() {
+async function scheduledStockCheck() {
+    if (!performStockCheckFn) {
+        console.error('❌ Stock check function not available');
+        return;
+    }
+    
     try {
-        console.log('🔍 Performing scheduled stock check...');
-        
-        // Step 1: Check stock status
-        const stockResult = await checkStock(config.PRODUCT_URL);
-        
-        // Step 2: Log the result
-        const logData = {
-            inStock: stockResult.inStock,
-            timestamp: stockResult.timestamp,
-            error: stockResult.error,
-            url: config.PRODUCT_URL
-        };
-        
-        const logResult = logStockCheck(logData);
-        if (!logResult.success) {
-            console.warn('⚠️ Failed to log stock check:', logResult.error);
-        }
-        
-        // Step 3: Check for status changes and send alerts
-        const statusChanged = lastKnownStatus !== null && lastKnownStatus !== stockResult.inStock;
-        const becameAvailable = statusChanged && !lastKnownStatus && stockResult.inStock;
-        
-        if (becameAvailable) {
-            console.log('🚨 Stock became available! Sending alert...');
-            
-            try {
-                const alertResult = await sendStockAlert(config.PRODUCT_URL, 'Nintendo Switch 2');
-                if (alertResult.success) {
-                    console.log('📧 Stock alert sent successfully');
-                } else {
-                    console.error('❌ Failed to send stock alert:', alertResult.error);
-                }
-            } catch (emailError) {
-                console.error('❌ Error sending stock alert:', emailError.message);
-            }
-        }
-        
-        // Update state
-        lastKnownStatus = stockResult.inStock;
-        
-        console.log(`📊 Stock check complete - Status: ${stockResult.inStock ? 'In Stock' : 'Out of Stock'}`);
-        
+        console.log('⏰ Scheduled stock check triggered');
+        const result = await performStockCheckFn();
+        console.log(`🎯 Scheduled check result: ${result.summary}`);
     } catch (error) {
-        console.error('❌ Stock check failed:', error.message);
-        
-        // Log error
-        try {
-            logStockCheck({
-                inStock: false,
-                timestamp: new Date().toISOString(),
-                error: error.message,
-                url: config.PRODUCT_URL
-            });
-        } catch (logError) {
-            console.error('❌ Failed to log error:', logError.message);
-        }
+        console.error('❌ Scheduled stock check failed:', error.message);
     }
 }
 
 /**
  * Start stock monitoring with 30-minute intervals
+ * @param {Function} stockCheckFunction - Integrated stock check function from main app
  * @returns {Object} Result object with success status
  */
-function startStockMonitoring() {
+function startStockMonitoring(stockCheckFunction) {
     if (isMonitoring) {
         return {
             success: false,
@@ -95,13 +48,22 @@ function startStockMonitoring() {
         };
     }
     
+    if (!stockCheckFunction) {
+        return {
+            success: false,
+            message: 'Stock check function is required'
+        };
+    }
+    
     try {
         console.log('🚀 Starting stock monitoring...');
-        console.log(`📍 Product URL: ${config.PRODUCT_URL}`);
         console.log('⏰ Schedule: Every 30 minutes');
         
+        // Store the integrated function
+        performStockCheckFn = stockCheckFunction;
+        
         // Create cron task for every 30 minutes
-        monitoringTask = cron.schedule('*/30 * * * *', performStockCheck, {
+        monitoringTask = cron.schedule('*/30 * * * *', scheduledStockCheck, {
             scheduled: false
         });
         
@@ -112,7 +74,7 @@ function startStockMonitoring() {
         console.log('✅ Stock monitoring started');
         
         // Run initial check
-        setImmediate(performStockCheck);
+        setImmediate(scheduledStockCheck);
         
         return {
             success: true,
@@ -149,6 +111,8 @@ function stopStockMonitoring() {
             monitoringTask = null;
         }
         
+        // Clear stored function
+        performStockCheckFn = null;
         isMonitoring = false;
         console.log('✅ Stock monitoring stopped');
         
@@ -167,57 +131,29 @@ function stopStockMonitoring() {
 }
 
 /**
- * Calculate yesterday's date in YYYY-MM-DD format
- * @returns {string} Yesterday's date
+ * Wrapper for scheduled daily summary using integrated workflow
  */
-function getYesterdayDate() {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday.toISOString().split('T')[0];
-}
-
-/**
- * Perform daily summary calculation and email sending
- */
-async function performDailySummary() {
+async function scheduledDailySummary() {
+    if (!performDailySummaryFn) {
+        console.error('❌ Daily summary function not available');
+        return;
+    }
+    
     try {
-        const yesterdayDate = getYesterdayDate();
-        console.log(`📊 Generating daily summary for ${yesterdayDate}...`);
-        
-        // Step 1: Calculate statistics for yesterday
-        const statsResult = getLast24HourStats(yesterdayDate);
-        
-        if (!statsResult.success) {
-            console.error('❌ Failed to get daily statistics:', statsResult.error);
-            return;
-        }
-        
-        const stats = statsResult.data;
-        console.log(`📈 Yesterday's stats: ${stats.totalChecks} checks, ${stats.inStockCount} in stock, ${stats.statusChanges} changes`);
-        
-        // Step 2: Send daily summary email
-        try {
-            const summaryResult = await sendDailySummary(stats, yesterdayDate);
-            
-            if (summaryResult.success) {
-                console.log('📧 Daily summary email sent successfully');
-            } else {
-                console.error('❌ Failed to send daily summary:', summaryResult.error);
-            }
-        } catch (emailError) {
-            console.error('❌ Error sending daily summary:', emailError.message);
-        }
-        
+        console.log('⏰ Scheduled daily summary triggered');
+        const result = await performDailySummaryFn();
+        console.log(`🎯 Daily summary result: ${result.summary}`);
     } catch (error) {
-        console.error('❌ Daily summary failed:', error.message);
+        console.error('❌ Scheduled daily summary failed:', error.message);
     }
 }
 
 /**
  * Start daily summary emails at midnight
+ * @param {Function} dailySummaryFunction - Integrated daily summary function from main app
  * @returns {Object} Result object with success status
  */
-function startDailySummary() {
+function startDailySummary(dailySummaryFunction) {
     if (isDailySummaryRunning) {
         return {
             success: false,
@@ -225,12 +161,22 @@ function startDailySummary() {
         };
     }
     
+    if (!dailySummaryFunction) {
+        return {
+            success: false,
+            message: 'Daily summary function is required'
+        };
+    }
+    
     try {
         console.log('🌙 Starting daily summary scheduler...');
         console.log('⏰ Schedule: Daily at midnight (00:00)');
         
+        // Store the integrated function
+        performDailySummaryFn = dailySummaryFunction;
+        
         // Create cron task for midnight daily
-        dailySummaryTask = cron.schedule('0 0 * * *', performDailySummary, {
+        dailySummaryTask = cron.schedule('0 0 * * *', scheduledDailySummary, {
             scheduled: false,
             timezone: 'America/Los_Angeles' // Adjust timezone as needed
         });
@@ -276,6 +222,8 @@ function stopDailySummary() {
             dailySummaryTask = null;
         }
         
+        // Clear stored function
+        performDailySummaryFn = null;
         isDailySummaryRunning = false;
         console.log('✅ Daily summary scheduler stopped');
         
