@@ -112,5 +112,17 @@
     "inStock": false,
     "error": null,
     "url": null
+  },
+  {
+    "timestamp": "2025-06-10T23:43:57.526Z",
+    "inStock": false,
+    "error": null,
+    "url": null
+  },
+  {
+    "timestamp": "2025-06-10T23:44:08.108Z",
+    "inStock": false,
+    "error": null,
+    "url": null
   }
 ]

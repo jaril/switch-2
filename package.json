@@ -9,7 +9,15 @@
     "stock-check": "node src/github-stock-check.js",
     "daily-summary": "node src/github-daily-summary.js",
     "health-check": "node src/github-health-check.js",
-    "notify-failure": "node src/github-notify-failure.js"
+    "notify-failure": "node src/github-notify-failure.js",
+    "test": "node test-complete.js",
+    "test:complete": "node test-complete.js",
+    "test:production": "node test-production-readiness.js",
+    "test:performance": "node test-performance.js",
+    "test:quick": "npm run test:production && npm run test:complete",
+    "test:all": "npm run test:production && npm run test:complete && npm run test:performance",
+    "validate": "npm run test:production",
+    "verify": "npm run test:quick"
   },
   "author": "",
   "license": "MIT",
