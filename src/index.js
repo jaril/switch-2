@@ -1348,7 +1348,16 @@ class StockMonitorApp {
                 }
                 
                 result.stockStatus = stockResult.inStock;
-                console.log(`📊 Current status: ${stockResult.inStock ? 'In Stock' : 'Out of Stock'}`);
+                
+                // Create clear status message based on both inStock and error fields
+                let statusDisplay;
+                if (stockResult.error) {
+                    statusDisplay = `Check Failed (${stockResult.error})`;
+                } else {
+                    statusDisplay = stockResult.inStock ? 'In Stock' : 'Out of Stock';
+                }
+                
+                console.log(`📊 Current status: ${statusDisplay}`);
 
                 // Step 4: Update application state with resilience
                 console.log('🔄 Updating application state with resilience...');
@@ -1488,8 +1497,13 @@ class StockMonitorApp {
             return `Stock check blocked in ${duration}ms - concurrent check in progress`;
         }
         
-        const status = result.stockStatus ? 'In Stock' : 'Out of Stock';
-        const errorCount = result.errors.length;
+        // Determine status based on whether there were errors
+        let status;
+        if (result.errors.length > 0 && result.errors.some(err => err.includes('timeout') || err.includes('network') || err.includes('failed after retries'))) {
+            status = 'Check Failed';
+        } else {
+            status = result.stockStatus ? 'In Stock' : 'Out of Stock';
+        }
         
         let summary = `Stock check completed in ${duration}ms - Status: ${status}`;
         
@@ -1501,8 +1515,8 @@ class StockMonitorApp {
             summary += ', Alert Sent';
         }
         
-        if (errorCount > 0) {
-            summary += `, ${errorCount} Error${errorCount > 1 ? 's' : ''}`;
+        if (result.errors.length > 0) {
+            summary += `, ${result.errors.length} Error${result.errors.length > 1 ? 's' : ''}`;
         }
         
         return summary;

@@ -78,12 +78,13 @@ function logStockCheck(stockResult) {
             throw new Error(`Log file initialization failed: ${initResult.error}`);
         }
 
-        // Create log entry with required fields
+        // Create log entry with required fields and clear status
         const logEntry = {
             timestamp: stockResult.timestamp || new Date().toISOString(),
             inStock: stockResult.inStock,
             error: stockResult.error || null,
-            url: stockResult.url || null
+            url: stockResult.url || null,
+            status: stockResult.error ? 'CHECK_FAILED' : (stockResult.inStock ? 'IN_STOCK' : 'OUT_OF_STOCK')
         };
 
         // Validate timestamp format
@@ -116,7 +117,23 @@ function logStockCheck(stockResult) {
         // Write updated logs back to file
         fs.writeFileSync(LOG_FILE_PATH, JSON.stringify(existingLogs, null, 2), 'utf8');
 
-        console.log(`📝 Logged stock check: ${logEntry.inStock ? '✅ In Stock' : '❌ Out of Stock'} at ${logEntry.timestamp}`);
+        // Create clear status message using the explicit status field
+        let statusMessage;
+        switch (logEntry.status) {
+            case 'IN_STOCK':
+                statusMessage = '✅ In Stock';
+                break;
+            case 'OUT_OF_STOCK':
+                statusMessage = '❌ Out of Stock';
+                break;
+            case 'CHECK_FAILED':
+                statusMessage = `⚠️ Check Failed (${logEntry.error})`;
+                break;
+            default:
+                statusMessage = `❓ Unknown Status (${logEntry.status})`;
+        }
+        
+        console.log(`📝 Logged stock check: ${statusMessage} at ${logEntry.timestamp}`);
 
         return {
             success: true,
@@ -338,17 +355,24 @@ function calculateDailyStats(date) {
         // Sort logs by timestamp (oldest first for accurate status change detection)
         dayLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-        // Calculate basic statistics
+        // Calculate basic statistics with clear status distinction
         const totalChecks = dayLogs.length;
-        const inStockCount = dayLogs.filter(log => log.inStock === true).length;
-        const outOfStockCount = dayLogs.filter(log => log.inStock === false).length;
+        const inStockCount = dayLogs.filter(log => log.status === 'IN_STOCK' || (log.inStock === true && !log.error)).length;
+        const outOfStockCount = dayLogs.filter(log => log.status === 'OUT_OF_STOCK' || (log.inStock === false && !log.error)).length;
+        const checkFailedCount = dayLogs.filter(log => log.status === 'CHECK_FAILED' || (log.error !== null)).length;
 
         // Find status changes
         const statusChanges = [];
         let lastStatus = null;
 
         dayLogs.forEach(log => {
-            const currentStatus = log.inStock ? 'in-stock' : 'out-of-stock';
+            // Use the explicit status field if available, otherwise determine from inStock/error
+            let currentStatus;
+            if (log.status) {
+                currentStatus = log.status.toLowerCase().replace('_', '-');
+            } else {
+                currentStatus = log.error ? 'check-failed' : (log.inStock ? 'in-stock' : 'out-of-stock');
+            }
             
             if (lastStatus !== null && lastStatus !== currentStatus) {
                 statusChanges.push({
@@ -370,6 +394,7 @@ function calculateDailyStats(date) {
             totalChecks: totalChecks,
             inStockCount: inStockCount,
             outOfStockCount: outOfStockCount,
+            checkFailedCount: checkFailedCount,
             statusChanges: statusChanges,
             firstCheck: firstCheck,
             lastCheck: lastCheck
@@ -427,17 +452,24 @@ function getLast24HourStats() {
         // Sort logs by timestamp (oldest first for accurate status change detection)
         recentLogs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-        // Calculate basic statistics
+        // Calculate basic statistics with clear status distinction
         const totalChecks = recentLogs.length;
-        const inStockCount = recentLogs.filter(log => log.inStock === true).length;
-        const outOfStockCount = recentLogs.filter(log => log.inStock === false).length;
+        const inStockCount = recentLogs.filter(log => log.status === 'IN_STOCK' || (log.inStock === true && !log.error)).length;
+        const outOfStockCount = recentLogs.filter(log => log.status === 'OUT_OF_STOCK' || (log.inStock === false && !log.error)).length;
+        const checkFailedCount = recentLogs.filter(log => log.status === 'CHECK_FAILED' || (log.error !== null)).length;
 
         // Find status changes in the last 24 hours
         const statusChanges = [];
         let lastStatus = null;
 
         recentLogs.forEach(log => {
-            const currentStatus = log.inStock ? 'in-stock' : 'out-of-stock';
+            // Use the explicit status field if available, otherwise determine from inStock/error
+            let currentStatus;
+            if (log.status) {
+                currentStatus = log.status.toLowerCase().replace('_', '-');
+            } else {
+                currentStatus = log.error ? 'check-failed' : (log.inStock ? 'in-stock' : 'out-of-stock');
+            }
             
             if (lastStatus !== null && lastStatus !== currentStatus) {
                 statusChanges.push({
@@ -462,6 +494,7 @@ function getLast24HourStats() {
             totalChecks: totalChecks,
             inStockCount: inStockCount,
             outOfStockCount: outOfStockCount,
+            checkFailedCount: checkFailedCount,
             statusChanges: statusChanges,
             firstCheck: firstCheck,
             lastCheck: lastCheck,
@@ -546,7 +579,13 @@ function getStatusChanges(date) {
         let lastLog = null;
 
         dayLogs.forEach((log, index) => {
-            const currentStatus = log.inStock ? 'in-stock' : 'out-of-stock';
+            // Use the explicit status field if available, otherwise determine from inStock/error
+            let currentStatus;
+            if (log.status) {
+                currentStatus = log.status.toLowerCase().replace('_', '-');
+            } else {
+                currentStatus = log.error ? 'check-failed' : (log.inStock ? 'in-stock' : 'out-of-stock');
+            }
             
             if (lastStatus !== null && lastStatus !== currentStatus) {
                 const change = {
@@ -569,13 +608,21 @@ function getStatusChanges(date) {
             lastLog = log;
         });
 
-        // Add summary information
+        // Add summary information with clear status handling
+        const getLogStatus = (log) => {
+            if (log.status) {
+                return log.status.toLowerCase().replace('_', '-');
+            } else {
+                return log.error ? 'check-failed' : (log.inStock ? 'in-stock' : 'out-of-stock');
+            }
+        };
+
         const summary = {
             date: date,
             totalChanges: statusChanges.length,
             totalLogs: dayLogs.length,
-            firstLogStatus: dayLogs.length > 0 ? (dayLogs[0].inStock ? 'in-stock' : 'out-of-stock') : null,
-            lastLogStatus: dayLogs.length > 0 ? (dayLogs[dayLogs.length - 1].inStock ? 'in-stock' : 'out-of-stock') : null
+            firstLogStatus: dayLogs.length > 0 ? getLogStatus(dayLogs[0]) : null,
+            lastLogStatus: dayLogs.length > 0 ? getLogStatus(dayLogs[dayLogs.length - 1]) : null
         };
 
         console.log(`✅ Found ${statusChanges.length} status changes on ${date}`);
