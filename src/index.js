@@ -1677,16 +1677,20 @@ class StockMonitorApp {
 const app = new StockMonitorApp();
 
 /**
- * Initialize the application only (no automatic startup)
+ * Initialize and start the application automatically
  */
 async function main() {
     try {
-        await app.initialize();
-        console.log('💡 Application initialized but not started automatically');
-        console.log('💡 Use app.startApplication() to begin monitoring');
-        console.log('💡 Use app.stopApplication() to stop monitoring');
+        console.log('🚀 Starting Nintendo Switch 2 Stock Monitor...');
+        const result = await app.startApplication();
+        if (!result.success) {
+            console.error('💥 Failed to start application:', result.error || result.message);
+            process.exit(1);
+        }
+        console.log('✅ Application started successfully and monitoring every 30 minutes');
+        console.log('💡 Press Ctrl+C to stop monitoring');
     } catch (error) {
-        console.error('💥 Failed to initialize application:', error.message);
+        console.error('💥 Failed to start application:', error.message);
         process.exit(1);
     }
 }
